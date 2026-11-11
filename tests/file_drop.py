@@ -21,7 +21,8 @@ parser.add_argument('--disc', type=Path, help='Also select and open a playlist f
 args = parser.parse_args()
 build = args.build.resolve()
 with tempfile.TemporaryDirectory(prefix='syncsyncav-drop-') as temp:
-    folder = Path(temp)
+    # Explorer returns long paths even when TEMP uses an 8.3 alias.
+    folder = Path(temp).resolve()
     app = folder / 'SyncSyncAV.exe'
     shutil.copy2(build / app.name, app)
     shutil.copytree(build / 'Fonts', folder / 'Fonts')

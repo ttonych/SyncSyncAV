@@ -3,7 +3,13 @@ $ErrorActionPreference = 'Stop'
 $taskVs = & (Join-Path $PSScriptRoot '../../tools/find-vs.ps1') -Requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 $taskMsvc = Get-ChildItem -LiteralPath (Join-Path $taskVs 'VC\Tools\MSVC') -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
 $taskSdk = 'C:\Program Files (x86)\Windows Kits\10'
-$taskSdkVersion = Get-ChildItem -LiteralPath (Join-Path $taskSdk 'Include') -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+$taskSdkVersion = Get-ChildItem -LiteralPath (Join-Path $taskSdk 'Include') -Directory |
+    Where-Object {
+        ($_.Name -as [version]) -and
+        (Test-Path -LiteralPath (Join-Path $taskSdk "Lib\$($_.Name)\ucrt\x64\ucrt.lib")) -and
+        (Test-Path -LiteralPath (Join-Path $taskSdk "Lib\$($_.Name)\um\x64\user32.lib"))
+    } | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+if (-not $taskSdkVersion) { throw 'Windows SDK with x64 UCRT and UM libraries not found.' }
 $env:INCLUDE = (@((Join-Path $taskMsvc.FullName 'include')) + @('ucrt','shared','um','winrt' | ForEach-Object { Join-Path $taskSdk "Include\$($taskSdkVersion.Name)\$_" })) -join ';'
 $env:LIB = (@((Join-Path $taskMsvc.FullName 'lib\x64')) + @('ucrt','um' | ForEach-Object { Join-Path $taskSdk "Lib\$($taskSdkVersion.Name)\$_\x64" })) -join ';'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 
 
 ENGINE = Path(__file__).resolve().parents[1] / "engine"
@@ -17,6 +18,7 @@ VIRTUALDUB = "https://github.com/v0lt/VirtualDub2/releases/download/2.5.7/Virtua
 FFMPEG_TOOLS = "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.7z"
 YASM = "https://www.tortall.net/projects/yasm/releases/yasm-1.3.0-win64.exe"
 YASM_CRT = "https://download.microsoft.com/download/1/6/5/165255E7-1014-4D0A-B094-B6A430A6BFFC/vcredist_x64.exe"
+DIRECTX_X64 = "https://download.microsoft.com/download/c/c/2/cc291a37-2ebd-4ac2-ba5f-4c9124733bf1/UAPSignedBinary_Microsoft.DirectX.x64.appx"
 
 
 def verify(path, expected):
@@ -76,8 +78,18 @@ def build_bluray(scratch, runtime, binaries, manifest):
         shutil.copyfile(tree / "COPYING", runtime / BLURAY_DIR / name)
 
 
+def prepare_shader_libraries(scratch, bin_dir):
+    # Asuka compiles legacy D3D9 effects and requests the legacy compiler in d3dx9_31.dll.
+    package = scratch / "Microsoft.DirectX.x64.appx"
+    download(DIRECTX_X64, package, "a042086b3eb11f354b28d7047ce6b249bc828c0f299a7b5e54a7e0adb112332b")
+    with zipfile.ZipFile(package) as archive:
+        for name in ("D3DX9_43.dll", "d3dx9_31.dll", "D3DCompiler_43.dll"):
+            (bin_dir / name).write_bytes(archive.read(name))
+
+
 def prepare_tools(scratch, bin_dir):
     bin_dir.mkdir()
+    prepare_shader_libraries(scratch, bin_dir)
     download(YASM, bin_dir / "yasm.exe", "d160b1d97266f3f28a71b4420a0ad2cd088a7977c2dd3b25af155652d8d8d91f")
     # The official x64 assembler imports the Visual C++ 2010 runtime.
     redist = scratch / "vcredist_x64.exe"

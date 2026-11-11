@@ -1,0 +1,36 @@
+name: Release Windows ZIPs
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Run ID of a successful Build Windows ZIPs on main
+        required: true
+        type: string
+      publish:
+        description: Publish the verified ZIPs as a GitHub Release
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-windows-zips
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify the build artifacts and apply the selected release mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          PUBLISH: ${{ inputs.publish }}
+        run: python3 .github/scripts/release_artifacts.py

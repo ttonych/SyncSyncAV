@@ -6,7 +6,7 @@
 
 The first public release lets you open two editions, find a matching frame, save a sync point and copy the offset. For Blu-ray sources, you can select and change playlists from an ISO, a disc root or a BDMV folder. The application and its corresponding sources are available as two archives. [v0.1.0 release](https://github.com/ttonych/SyncSyncAV/releases/tag/v0.1.0)
 
-## Ready for the next release
+## v0.1.1 — bilingual user guides
 
 The packager puts both guides next to `SyncSyncAV.exe`. Readers can switch between `README.md` and `README.ru.md` offline.
 

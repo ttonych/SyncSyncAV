@@ -2,9 +2,10 @@
 
 [Русский](../ru/CHANGELOG.md) · [User guide](../../README.md)
 
-## Unreleased
+## v0.1.1 — 11 November 2026
 
 - The application ZIP includes both the English and Russian READMEs. The source tree also includes contributor guidelines, a roadmap, a changelog and the Engine build guide in both languages.
+- Before publishing, GitHub Actions checks both packaged READMEs against the build commit and their SHA-256 digests against the package manifest. [Download v0.1.1](https://github.com/ttonych/SyncSyncAV/releases/tag/v0.1.1)
 
 ## v0.1.0 — 11 November 2026
 

@@ -6,7 +6,7 @@ SyncSyncAV helps you align audio or subtitles from two editions of the same film
 
 ## First run
 
-On Windows x64 with .NET Framework 4.8, download **SyncSyncAV_0.1.0.zip**, extract the entire archive and run `SyncSyncAV.exe`. Keep the `Engine` folder next to the executable. On first launch the interface uses Russian on Russian-language Windows and English elsewhere. You can change it under **Settings → Language**, even with both videos open. [Download the app](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.0/SyncSyncAV_0.1.0.zip) · [Download the v0.1.0 sources](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.0/SyncSyncAV_0.1.0_source.zip)
+On Windows x64 with .NET Framework 4.8, download **SyncSyncAV_0.1.1.zip**, extract the entire archive and run `SyncSyncAV.exe`. Keep the `Engine` folder next to the executable. On first launch the interface uses Russian on Russian-language Windows and English elsewhere. You can change it under **Settings → Language**, even with both videos open. [Download the app](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.1/SyncSyncAV_0.1.1.zip) · [Download the v0.1.1 sources](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.1/SyncSyncAV_0.1.1_source.zip)
 
 ## Measure an offset
 

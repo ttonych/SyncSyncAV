@@ -59,9 +59,15 @@ static class FileDropTests {
     static bool Media(HostState state,string path) {
         return state!=null&&!state.Busy&&(path==null?!state.HasMedia:state.HasMedia&&String.Equals(state.File,path,StringComparison.OrdinalIgnoreCase));
     }
+    static bool PaneReady(string side,HostState state,string path) {
+        if(!Media(state,path))return false;
+        // The native host can report the new file before the shell re-enables its controls.
+        var action=Button((path==null?"EmptyOpen":"Open")+side);
+        return action!=null&&action.IsVisible&&action.IsEnabled;
+    }
     static Task Expect(string a,string b) {
         var session=shell.Controller.Session;
-        return Wait(()=>!shell.Controller.Working&&Media(session.HostA,a)&&Media(session.HostB,b),"Unexpected A/B media: "+a+" / "+b);
+        return Wait(()=>!shell.Controller.Working&&PaneReady("A",session.HostA,a)&&PaneReady("B",session.HostB,b),"Panes not ready for: "+a+" / "+b);
     }
     static T Method<T>(IntPtr target,int slot) where T:class {
         return (T)(object)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(Marshal.ReadIntPtr(target),slot*IntPtr.Size),typeof(T));

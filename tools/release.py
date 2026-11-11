@@ -78,7 +78,7 @@ def make_runtime(runtime):
         copy(args.app/name,runtime/name)
     for name in git(repo,"ls-files","source/Fonts").decode().splitlines():
         copy(repo/name,runtime/"Fonts"/Path(name).name)
-    for name in ("README.md","LICENSE.txt"):
+    for name in ("README.md","README.ru.md","LICENSE.txt"):
         copy(repo/name,runtime/name)
     copy(repo/"engine/bridge/SDK-LICENSE.txt",runtime/"Engine/SDK-LICENSE.txt")
     copy(repo/"source/Assets/SyncSyncAV.ico",runtime/"SyncSyncAV.ico")

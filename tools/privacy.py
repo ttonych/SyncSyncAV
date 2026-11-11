@@ -9,6 +9,8 @@ import zipfile
 
 
 PUBLIC_IDENTITY = b"SyncSyncAV contributors <project@localhost.invalid>"
+PUBLIC_REPOSITORY_URL = b"https://github.com/ttonych/SyncSyncAV"
+REPOSITORY_LINK = re.compile(re.escape(PUBLIC_REPOSITORY_URL.lower()) + rb"(?=$|[/#?\s)\"'<>])")
 
 
 def private_patterns(build_roots=()):
@@ -46,10 +48,15 @@ def contains_identity(data,patterns):
 
 def inspect(name, data, patterns):
     folded = data.lower()
+    if name.lower().endswith(".md") or name.rsplit("/", 2)[-2:] == ["tools", "privacy.py"]:
+        # The public repository owner can also be a private Git name. Keep checking the rest of the link.
+        folded = REPOSITORY_LINK.sub(b"https://github.com/", folded)
     if contains_identity(folded,patterns):
         # The member name itself may contain private data.
         raise ValueError("Private identity or local path detected in "+safe_name(name,patterns))
-    owned=name.startswith(("source/","tests/","tools/")) or name in {"README.md","engine/README.md","build-release.ps1"}
+    owned=(name.startswith(("source/","tests/","tools/","docs/"))
+           or name in {"engine/README.md","engine/README.ru.md","build-release.ps1"}
+           or ("/" not in name and name.endswith(".md")))
     if owned and "/Fonts/" not in name and name.lower().endswith((".cs",".ps1",".py",".md",".xaml",".xml",".txt")):
         emails=re.findall(rb"[A-Za-z0-9_.%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",data)
         if any(address!=b"project@localhost.invalid" for address in emails):

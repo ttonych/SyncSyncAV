@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess
 import sys
-from privacy import check_history, inspect, private_patterns
+from privacy import PUBLIC_IDENTITY, check_history, inspect, private_patterns
 
 repo=Path(__file__).resolve().parents[1]
 def git(*args):
@@ -14,7 +14,7 @@ def main():
         check_history(repo,rules)
     elif sys.argv[1:]==["--staged"]:
         for key in ("GIT_AUTHOR_IDENT","GIT_COMMITTER_IDENT"):
-            if not git("var",key).startswith(b"SyncSyncAV contributors <project@localhost.invalid> "):
+            if not git("var",key).startswith(PUBLIC_IDENTITY+b" "):
                 raise ValueError("Select the public project identity before committing.")
         paths=git("diff","--cached","--name-only","--diff-filter=ACMRT","-z")
         for raw in filter(None,paths.split(b"\0")):

@@ -8,7 +8,10 @@ import tarfile
 import zipfile
 
 
-def private_patterns():
+PUBLIC_IDENTITY = b"SyncSyncAV contributors <project@localhost.invalid>"
+
+
+def private_patterns(build_roots=()):
     values = {os.environ.get(k, "") for k in ("USERNAME","COMPUTERNAME","GIT_AUTHOR_EMAIL",
                                                "GIT_COMMITTER_EMAIL","GIT_AUTHOR_NAME","GIT_COMMITTER_NAME")}
     for field in ("user.email","user.name"):
@@ -16,6 +19,9 @@ def private_patterns():
         values.update(result.stdout.splitlines())
     values.update(os.environ.get("SYNCSYNCAV_PRIVATE_TERMS","").splitlines())
     values.difference_update({"SyncSyncAV contributors","project@localhost.invalid"})
+    for root in build_roots:
+        prefix = root.resolve().as_posix().rstrip("/") + "/"
+        values.update((prefix, prefix.replace("/", chr(92))))
     # Generic profile roots are checked even on a different build machine.
     for sep in ("/",chr(92)):
         values.update([":"+sep+"Users"+sep, "Documents"+sep+"Codex"])
@@ -83,8 +89,15 @@ def check_history(repo,patterns):
             data=cat.stdout.read(int(size));cat.stdout.read(1)
             inspect("Git path",name,patterns)
             inspect(name.decode(errors="replace") or kind.decode(),data,patterns)
+            if kind not in (b"commit",b"tag"):
+                continue
+            headers=data.partition(b"\n\n")[0]
             if kind==b"commit":
-                identities=re.findall(rb"^(?:author|committer) (.+?) [0-9]+ [+-][0-9]+$",data,re.M)
-                if len(identities)!=2 or any(i!=b"SyncSyncAV contributors <project@localhost.invalid>" for i in identities):
+                identities=re.findall(rb"^(?:author|committer) (.+?) [0-9]+ [+-][0-9]+$",headers,re.M)
+                if identities!=[PUBLIC_IDENTITY, PUBLIC_IDENTITY]:
                     raise ValueError("Non-project commit identity in public history")
+            else:
+                for line in headers.splitlines():
+                    if line.startswith(b"tagger ") and line[7:].rsplit(b" ",2)[0]!=PUBLIC_IDENTITY:
+                        raise ValueError("Non-project tagger identity in public history")
         cat.stdin.close()

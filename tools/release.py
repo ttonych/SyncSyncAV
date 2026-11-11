@@ -94,7 +94,7 @@ if any(p.exists() for p in destinations):
     raise SystemExit("Release already exists; select a fresh output directory.")
 if git(repo,"status","--porcelain"):
     raise SystemExit("Commit the reviewed public sources first.")
-rules=private_patterns()
+rules=private_patterns((repo, args.host, args.decoder))
 check_history(repo,rules)
 trees={key:patched_tree(key,path) for key,path in (("host",args.host),("decoder",args.decoder))}
 with tempfile.TemporaryDirectory(dir=output,prefix=".release-") as temp:

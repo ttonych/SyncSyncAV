@@ -24,6 +24,95 @@ index 9807159deef06220159509b6221a970b150bc986..1a203ca9de4c6974e9e8136aea95f4ab
  }
  
  int get_version() {
+diff --git a/src/VirtualDub.props b/src/VirtualDub.props
+index 2d2f70facdbd942846bf4e27f6f517482a356047..637f71e8101353fe6691fd26857d56eddec89d60 100644
+--- a/src/VirtualDub.props
++++ b/src/VirtualDub.props
+@@ -28,6 +28,8 @@
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+     <ClCompile>
++      <!-- Retain the diagnostic source filename without embedding the build directory. -->
++      <AdditionalOptions>%(AdditionalOptions) "/d1trimfile:$(MSBuildThisFileDirectory)\"</AdditionalOptions>
+       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+       <IntrinsicFunctions>true</IntrinsicFunctions>
+       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+diff --git a/src/VirtualDub/VirtualDub2.vcxproj b/src/VirtualDub/VirtualDub2.vcxproj
+index 53a711d4bb1c84e018ef6bfb7a7f088a98900381..14b73c07a02bf752e23b169895a5b2e72b5c91ad 100644
+--- a/src/VirtualDub/VirtualDub2.vcxproj
++++ b/src/VirtualDub/VirtualDub2.vcxproj
+@@ -96,7 +96,7 @@
+     </ResourceCompile>
+     <PreLinkEvent>
+       <Message>Updating build number information...</Message>
+-      <Command>$(VDOutputPath)\Asuka verinc
++      <Command>"$(VDOutputPath)\Asuka.exe" verinc
+ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+ </Command>
+     </PreLinkEvent>
+@@ -118,7 +118,7 @@ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+     </Bscmake>
+     <PostBuildEvent>
+       <Message>Compiling function location database...</Message>
+-      <Command>$(VDOutputPath)\Asuka mapconv $(VDOutputPath)\$(TargetName).map $(VDOutputPath)\$(TargetName).vdi res\ia32.vdi</Command>
++      <Command>"$(VDOutputPath)\Asuka.exe" mapconv "$(VDOutputPath)\$(TargetName).map" "$(VDOutputPath)\$(TargetName).vdi" res\ia32.vdi</Command>
+     </PostBuildEvent>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+@@ -149,7 +149,7 @@ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+     </ResourceCompile>
+     <PreLinkEvent>
+       <Message>Updating build number information...</Message>
+-      <Command>$(VDOutputPath)\Asuka verinc /amd64
++      <Command>"$(VDOutputPath)\Asuka.exe" verinc /amd64
+ yasm -g cv8 -f win64 -o "$(IntDir)verstub.obj" verstub.asm
+ </Command>
+     </PreLinkEvent>
+@@ -170,7 +170,7 @@ yasm -g cv8 -f win64 -o "$(IntDir)verstub.obj" verstub.asm
+     </Bscmake>
+     <PostBuildEvent>
+       <Message>Compiling function location database...</Message>
+-      <Command>$(VDOutputPath)\Asuka mapconv $(VDOutputPath)\$(TargetName).map $(VDOutputPath)\$(TargetName).vdi res\amd64.vdi</Command>
++      <Command>"$(VDOutputPath)\Asuka.exe" mapconv "$(VDOutputPath)\$(TargetName).map" "$(VDOutputPath)\$(TargetName).vdi" res\amd64.vdi</Command>
+     </PostBuildEvent>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+@@ -199,7 +199,7 @@ yasm -g cv8 -f win64 -o "$(IntDir)verstub.obj" verstub.asm
+     </ResourceCompile>
+     <PreLinkEvent>
+       <Message>Updating build number information...</Message>
+-      <Command>$(VDOutputPath)\Asuka verinc
++      <Command>"$(VDOutputPath)\Asuka.exe" verinc
+ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+ </Command>
+     </PreLinkEvent>
+@@ -223,7 +223,7 @@ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+     </Bscmake>
+     <PostBuildEvent>
+       <Message>Compiling function location database...</Message>
+-      <Command>$(VDOutputPath)\Asuka mapconv $(VDOutputPath)\$(TargetName).map $(VDOutputPath)\$(TargetName).vdi res\ia32.vdi</Command>
++      <Command>"$(VDOutputPath)\Asuka.exe" mapconv "$(VDOutputPath)\$(TargetName).map" "$(VDOutputPath)\$(TargetName).vdi" res\ia32.vdi</Command>
+     </PostBuildEvent>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+@@ -252,7 +252,7 @@ yasm -g cv8 -f win32 -o "$(IntDir)verstub.obj" verstub.asm
+     </ResourceCompile>
+     <PreLinkEvent>
+       <Message>Updating build number information...</Message>
+-      <Command>$(VDOutputPath)\Asuka verinc /amd64
++      <Command>"$(VDOutputPath)\Asuka.exe" verinc /amd64
+ yasm -g cv8 -f win64 -o "$(IntDir)verstub.obj" verstub.asm
+ </Command>
+     </PreLinkEvent>
+@@ -276,7 +276,7 @@ yasm -g cv8 -f win64 -o "$(IntDir)verstub.obj" verstub.asm
+     </Bscmake>
+     <PostBuildEvent>
+       <Message>Compiling function location database...</Message>
+-      <Command>$(VDOutputPath)\Asuka mapconv $(VDOutputPath)\$(TargetName).map $(VDOutputPath)\$(TargetName).vdi res\amd64.vdi</Command>
++      <Command>"$(VDOutputPath)\Asuka.exe" mapconv "$(VDOutputPath)\$(TargetName).map" "$(VDOutputPath)\$(TargetName).vdi" res\amd64.vdi</Command>
+     </PostBuildEvent>
+   </ItemDefinitionGroup>
+   <ItemGroup>
 diff --git a/src/VirtualDub/h/project.h b/src/VirtualDub/h/project.h
 index 46ac9c924a54cc7657d3a6e3b9a6665454c98971..acca807223b6119ee817f64aa50d9188cb7e2cb0 100644
 --- a/src/VirtualDub/h/project.h

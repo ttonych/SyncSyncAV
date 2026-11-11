@@ -27,7 +27,7 @@ git diff --cached --binary --full-index --output=C:/Build/project/engine/patches
 
 Откройте **Actions → Build Windows ZIPs → Run workflow** и выберите ветку. Для появления кнопки файл workflow должен находиться в основной ветке репозитория. После успешного прогона в разделе **Artifacts** доступны два ZIP — приложение для Windows x64 и соответствующие исходники.
 
-На Windows Server 2022 задание получает 35 файлов из выпуска VirtualDub2 2.5.7.1257. Оно проверяет SHA-256 архива и файлов по `runtime-files.json`. Пять DLL FFmpeg входят в этот архив. Для тестов отдельно скачиваются консольные ffmpeg и ffprobe, для сборки хоста — Yasm. Версии и SHA-256 этих загрузок закреплены в `tools/prepare-ci.py`.
+На Windows Server 2022 задание получает 35 файлов из выпуска VirtualDub2 2.5.7.1257. Оно проверяет SHA-256 архива и файлов по `runtime-files.json`. Пять DLL FFmpeg входят в этот архив. Для тестов отдельно скачиваются консольные ffmpeg и ffprobe, для сборки хоста — Yasm и его библиотека MSVCR100.dll из пакета Microsoft. Библиотека распаковывается рядом с Yasm в каталоге инструментов сборки. Версии и SHA-256 этих загрузок закреплены в `tools/prepare-ci.py`.
 
 Для повторения сборки на Windows с Visual Studio 2022 (MSVC v143, Windows SDK, .NET Framework 4.8), Git, 7-Zip и Python 3.13 x64 выполните эти команды из чистой рабочей копии.
 

@@ -16,6 +16,7 @@ BLURAY_DIR = "plugins64/libbluray/"
 VIRTUALDUB = "https://github.com/v0lt/VirtualDub2/releases/download/2.5.7/VirtualDub2_v2.5.7.1257.7z"
 FFMPEG_TOOLS = "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.7z"
 YASM = "https://www.tortall.net/projects/yasm/releases/yasm-1.3.0-win64.exe"
+YASM_CRT = "https://download.microsoft.com/download/1/6/5/165255E7-1014-4D0A-B094-B6A430A6BFFC/vcredist_x64.exe"
 
 
 def verify(path, expected):
@@ -78,6 +79,14 @@ def build_bluray(scratch, runtime, binaries, manifest):
 def prepare_tools(scratch, bin_dir):
     bin_dir.mkdir()
     download(YASM, bin_dir / "yasm.exe", "d160b1d97266f3f28a71b4420a0ad2cd088a7977c2dd3b25af155652d8d8d91f")
+    # The official x64 assembler imports the Visual C++ 2010 runtime.
+    redist = scratch / "vcredist_x64.exe"
+    download(YASM_CRT, redist, "f3b7a76d84d23f91957aa18456a14b4e90609e4ce8194c5653384ed38dada6f3")
+    subprocess.run(["7z", "e", "-y", "-o" + str(scratch), redist, "-ir!vc_red.cab"], check=True)
+    member = "F_CENTRAL_msvcr100_x64"
+    subprocess.run(["7z", "e", "-y", "-o" + str(scratch), scratch / "vc_red.cab", member], check=True)
+    (scratch / member).rename(bin_dir / "msvcr100.dll")
+    subprocess.run([bin_dir / "yasm.exe", "--version"], check=True)
     archive = scratch / "ffmpeg-tools.7z"
     download(FFMPEG_TOOLS, archive, "e25b682664025d49034c981afb4bae36238a40f29a3cc1c713ad9a8b5b3528f6")
     prefix = "ffmpeg-8.1.2-essentials_build/bin/"

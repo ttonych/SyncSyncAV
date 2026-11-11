@@ -6,8 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourceRoot = (Resolve-Path -LiteralPath $Checkout).Path
 if (!$VisualStudioDirectory) {
-    $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    $VisualStudioDirectory=& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $VisualStudioDirectory = & (Join-Path $PSScriptRoot '../tools/find-vs.ps1') -Requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 }
 $env:_LINK_=($env:_LINK_+' /PDBALTPATH:%_PDB%').Trim()
 if (Test-Path -LiteralPath (Join-Path $sourceRoot '.git')) { & (Join-Path $sourceRoot 'update_revision.cmd') }

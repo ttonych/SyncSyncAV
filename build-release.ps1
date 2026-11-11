@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$YasmDirectory,
     [string]$HostMirror,
-    [string]$DecoderMirror
+    [string]$DecoderMirror,
+    [string]$BuiltBlurayDirectory
 )
 $ErrorActionPreference='Stop'
 $work=(New-Item -ItemType Directory -Force -Path $WorkDirectory).FullName
@@ -30,5 +31,7 @@ $bridge=Join-Path $work 'bridge-build'
 & (Join-Path $PSScriptRoot 'engine/bridge/build.ps1') -OutputDirectory $bridge
 & (Join-Path $PSScriptRoot 'source/build.ps1') -OutputDirectory $app
 & (Join-Path $PSScriptRoot 'tests/test.ps1') -OutputDirectory (Join-Path $work 'unit')
-& python (Join-Path $PSScriptRoot 'tools/release.py') --app $app --runtime $RuntimeDirectory --bridge $bridge --host $trees.host --decoder $trees.decoder --output $OutputDirectory
+$blurayArgs = @()
+if ($BuiltBlurayDirectory) { $blurayArgs = @('--built-bluray', (Resolve-Path -LiteralPath $BuiltBlurayDirectory).Path) }
+& python (Join-Path $PSScriptRoot 'tools/release.py') --app $app --runtime $RuntimeDirectory --bridge $bridge --host $trees.host --decoder $trees.decoder --output $OutputDirectory @blurayArgs
 if ($LASTEXITCODE) {throw 'Release verification failed'}

@@ -1,6 +1,7 @@
 param([string]$OutputDirectory=(Join-Path $PSScriptRoot '..\validation'))
 $ErrorActionPreference='Stop'
-$taskCsc='C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
+$vs = & (Join-Path $PSScriptRoot '../tools/find-vs.ps1')
+$taskCsc = Join-Path $vs 'MSBuild/Current/Bin/Roslyn/csc.exe'
 $taskRoot=Split-Path $PSScriptRoot -Parent
 $taskOutput=(New-Item -ItemType Directory -Force -Path $OutputDirectory).FullName
 & $taskCsc /nologo /target:exe /platform:x64 /warn:4 /warnaserror+ "/resource:$taskRoot\source\Strings.xml,Strings.xml" /reference:System.Xml.dll /reference:System.dll /reference:System.Core.dll /reference:System.Web.Extensions.dll "/out:$taskOutput\SessionTests.exe" "$taskRoot\source\Ui.cs" "$taskRoot\source\BridgeClient.cs" "$taskRoot\source\DiscMetadata.cs" "$taskRoot\source\SyncSession.cs" "$PSScriptRoot\SessionTests.cs"

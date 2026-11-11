@@ -1,6 +1,7 @@
 ﻿param([string]$OutputDirectory = (Join-Path $PSScriptRoot '..\build'))
 $ErrorActionPreference = 'Stop'
-$taskCsc = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
+$vs = & (Join-Path $PSScriptRoot '../tools/find-vs.ps1')
+$taskCsc = Join-Path $vs 'MSBuild/Current/Bin/Roslyn/csc.exe'
 $taskFramework = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $taskOut = (Resolve-Path -LiteralPath $OutputDirectory).Path

@@ -5,9 +5,8 @@ if ($YasmDirectory) { $env:PATH=$YasmDirectory+';'+$env:PATH }
 Get-Command yasm.exe -ErrorAction Stop | Out-Null
 $env:DXSDK_DIR=Join-Path $tree 'directx\'
 $env:_LINK_=($env:_LINK_+' /PDBALTPATH:%_PDB%').Trim()
-$vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\Current\Bin\MSBuild.exe' | Select-Object -First 1
-if (!$msbuild) {throw 'Install Visual Studio Build Tools with the C++ workload.'}
+$vs = & (Join-Path $PSScriptRoot '../tools/find-vs.ps1') -Requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+$msbuild = Join-Path $vs 'MSBuild/Current/Bin/MSBuild.exe'
 # Asuka includes revision.h before the VirtualDub project runs its pre-build event.
 if (Test-Path -LiteralPath (Join-Path $tree '.git')) { & (Join-Path $tree 'update_revision.cmd') }
 if (!(Test-Path -LiteralPath (Join-Path $tree 'revision.h'))) {throw 'Missing upstream revision metadata'}

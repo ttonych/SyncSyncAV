@@ -23,6 +23,24 @@ git diff --cached --binary --full-index --output=C:/Build/project/engine/patches
 
 После проверки укажите новый SHA в `upstream.json`, проверьте повторное применение в пустую папку и зафиксируйте патч и SHA вместе. При смене ABI FFmpeg также обновите зависимости, их контрольные суммы и настройку импортных библиотек в `build-decoder.ps1`.
 
+## Ручная сборка в GitHub Actions
+
+Откройте **Actions → Build Windows ZIPs → Run workflow** и выберите ветку. Для появления кнопки файл workflow должен находиться в основной ветке репозитория. После успешного прогона в разделе **Artifacts** доступны два ZIP — приложение для Windows x64 и соответствующие исходники.
+
+На Windows Server 2022 задание получает 35 файлов из выпуска VirtualDub2 2.5.7.1257. Оно проверяет SHA-256 архива и файлов по `runtime-files.json`. Пять DLL FFmpeg входят в этот архив. Для тестов отдельно скачиваются консольные ffmpeg и ffprobe, для сборки хоста — Yasm. Версии и SHA-256 этих загрузок закреплены в `tools/prepare-ci.py`.
+
+Для повторения сборки на Windows с Visual Studio 2022 (MSVC v143, Windows SDK, .NET Framework 4.8), Git, 7-Zip и Python 3.13 x64 выполните эти команды из чистой рабочей копии.
+
+```powershell
+python -m pip install meson==1.9.1 ninja==1.13.0 pywin32==311
+python tools/prepare-ci.py .local/ci-inputs
+$inputsDir = (Resolve-Path .local/ci-inputs).Path
+$env:PATH = (Join-Path $inputsDir 'bin') + ';' + $env:PATH
+./build-release.ps1 -WorkDirectory .local/ci-build -RuntimeDirectory "$inputsDir/runtime" -BuiltBlurayDirectory "$inputsDir/bluray" -OutputDirectory .local/ci-out
+```
+
+Подготовка создаёт новый каталог входных файлов. Для повторной сборки с теми же зависимостями можно использовать готовый `ci-inputs`. Повторная упаковка той же версии требует нового каталога вывода. Перед сохранением архивов выполняются модульные и транспортные тесты, а затем сценарии интерфейса с синтетическим Blu-ray ISO на отдельном рабочем столе Windows.
+
 ## Собрать проверяемый выпуск
 
 Нужны Git, Visual Studio 2022 Community с C++ и Windows SDK, Yasm в PATH или параметр `-YasmDirectory`, Python 3.11+ с pywin32, а также ffmpeg и ffprobe в PATH для создания тестовых роликов и образа UDF. Параметр `-RuntimeDirectory` задаёт каталог готовых сторонних библиотек. Для локальной сборки положите туда файлы с путями и SHA-256 из `engine/runtime-files.json`. Подойдёт и каталог `Engine` из совместимой сборки.
@@ -45,4 +63,4 @@ git config --local core.hooksPath .githooks
 
 ## Библиотеки Blu-ray
 
-Исходный архив libbluray 1.5.0, порт libudfread 1.2.0, его исправление MSVC и уведомления об авторстве находятся в `dependencies/`. Для libbluray используются Meson, shared release, `--vsenv`, отключённые BD-J, fontconfig, freetype, libxml2, tools и examples. Для libudfread примените `libudfread-msvc.diff` к исходнику версии из порта, выполните `meson setup build --vsenv --buildtype=release -Ddefault_library=shared -Denable_examples=false` и `meson compile -C build`. Сборка в нейтральном каталоге с параметром линкера `/PDBALTPATH:%_PDB%` исключает путь к личному профилю из записи PDB.
+В `dependencies/libbluray-1.5.0.tar.xz` находятся исходники libbluray 1.5.0 и libudfread 1.2.0. Скрипт подготовки проверяет SHA-256 архива, применяет `libudfread-msvc.diff` и собирает обе библиотеки как x64 DLL с помощью Meson, Ninja и MSVC. Параметр `-BuiltBlurayDirectory` указывает упаковщику эти два результата сборки. Лицензии сверяются с манифестом, а фактические SHA-256 собранных DLL записываются в `SHA256.json` выпуска. При локальной упаковке с одним `-RuntimeDirectory` действуют исходные контрольные суммы всех 39 готовых файлов.

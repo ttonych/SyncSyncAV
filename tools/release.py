@@ -16,6 +16,7 @@ repo=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__)
 for arg in ("app","runtime","host","decoder","bridge","output"):
     parser.add_argument("--"+arg,required=True,type=Path)
+parser.add_argument("--built-bluray", type=Path, help="Directory containing both freshly built Blu-ray DLLs")
 args=parser.parse_args()
 
 
@@ -34,7 +35,8 @@ def copy(source,destination):
 
 
 def archive_tree(archive, prefix, tree, revision):
-    raw=git(tree,"archive","--format=zip",revision)
+    # Preserve committed line endings even on Windows runners with automatic checkout conversion.
+    raw=git(tree,"-c","core.autocrlf=false","archive","--format=zip",revision)
     with zipfile.ZipFile(io.BytesIO(raw)) as src:
         for item in src.infolist():
             if not item.is_dir():
@@ -55,6 +57,9 @@ def patched_tree(component,tree):
 
 def make_runtime(runtime):
     for name,expected in json.loads((repo/"engine/runtime-files.json").read_text()).items():
+        if args.built_bluray and name in ("plugins64/libbluray/bluray-4.dll", "plugins64/libbluray/udfread-3.dll"):
+            copy(args.built_bluray/Path(name).name, runtime/"Engine"/name)
+            continue
         src=args.runtime/name
         if digest(src)!=expected:
             raise ValueError("Runtime dependency hash mismatch: "+name)

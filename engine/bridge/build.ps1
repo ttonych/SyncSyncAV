@@ -1,6 +1,6 @@
 param([string]$OutputDirectory = (Join-Path $PSScriptRoot '..\build'))
 $ErrorActionPreference = 'Stop'
-$taskVs = 'C:\Program Files\Microsoft Visual Studio\2022\Community'
+$taskVs = & (Join-Path $PSScriptRoot '../../tools/find-vs.ps1') -Requires 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 $taskMsvc = Get-ChildItem -LiteralPath (Join-Path $taskVs 'VC\Tools\MSVC') -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
 $taskSdk = 'C:\Program Files (x86)\Windows Kits\10'
 $taskSdkVersion = Get-ChildItem -LiteralPath (Join-Path $taskSdk 'Include') -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1

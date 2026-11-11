@@ -30,7 +30,10 @@ with tempfile.TemporaryDirectory(prefix='syncsyncav-drop-') as temp:
         subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color={color}:size=320x180:rate=24',
                         '-t', '2', '-c:v', 'mpeg4', folder / ('Видео ' + suffix)], check=True)
     (folder / 'ignored.txt').write_text('text')
-    compiler = Path('C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/Roslyn/csc.exe')
+    find_vs = Path(__file__).resolve().parents[1] / 'tools/find-vs.ps1'
+    installation = subprocess.check_output(
+        ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', find_vs], text=True).strip()
+    compiler = Path(installation) / 'MSBuild/Current/Bin/Roslyn/csc.exe'
     wpf = Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/WPF')
     runner = folder / 'FileDropTests.exe'
     refs = [str(wpf / (n+'.dll')) for n in ['WindowsBase','PresentationCore','PresentationFramework']]

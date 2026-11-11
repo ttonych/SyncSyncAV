@@ -30,6 +30,8 @@ Update the SHA in `engine/upstream.json`, check that the patch applies in an emp
 1. Open **Actions → Build Windows ZIPs → Run workflow**. Select `main` for a release candidate. After the tests pass, the run's **Artifacts** section contains the Windows x64 application ZIP and its matching source ZIP.
 2. Open **Actions → Release Windows ZIPs → Run workflow** on `main`. Enter the numeric ID from the successful build's URL. By default the runner verifies both SHA-256 digests. To publish, select **Publish the verified ZIPs as a GitHub Release**. The runner attaches both original archives to a draft, verifies their digests and publishes a release tagged at the build commit. The release ZIPs stay on GitHub throughout.
 
+The verification log lists each README inside the application ZIP with its size and SHA-256. The runner compares the guides with the build commit and the ZIP's `SHA256.json` manifest.
+
 On Windows Server 2022, the build takes 35 files from the VirtualDub2 2.5.7.1257 release, including five FFmpeg DLLs. It checks the archive SHA-256 and the file hashes in `engine/runtime-files.json`. It downloads the ffmpeg and ffprobe command-line tools separately for testing, and Yasm and Microsoft's MSVCR100.dll for building the host. Asuka uses DirectX 9 libraries extracted from Microsoft's DirectX x64 package to compile shaders. These build-time DLLs live in the tools directory on the runner. Download versions and checksums are pinned in `tools/prepare-ci.py`.
 
 ## Reproduce the build locally

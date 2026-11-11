@@ -1,4 +1,5 @@
 """Promote the exact ZIPs from a successful Windows build on a GitHub-hosted runner."""
+import base64
 import hashlib
 import json
 import os
@@ -6,11 +7,33 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import zipfile
 
 
 def api(endpoint, *options):
     raw = subprocess.check_output(["gh", "api", endpoint, *options])
     return json.loads(raw) if raw else None
+
+
+def verify_readmes(repo, sha, path):
+    tree = api(f"{repo}/git/trees/{sha}")
+    blobs = {item["path"]: item["sha"] for item in tree["tree"] if item["type"] == "blob"}
+    if tree["truncated"] or "README.md" not in blobs:
+        raise ValueError("Could not identify the user guides in the build commit")
+    # Builds predating the bilingual guide shipped only README.md.
+    names = ["README.md", "README.ru.md"] if "README.ru.md" in blobs else ["README.md"]
+    with zipfile.ZipFile(path) as archive:
+        manifest = json.loads(archive.read(f"{path.stem}/SHA256.json"))["files"]
+        for name in names:
+            member = f"{path.stem}/{name}"
+            if archive.namelist().count(member) != 1:
+                raise ValueError(f"Expected exactly one {member} in the application ZIP")
+            data = archive.read(member)
+            digest = hashlib.sha256(data).hexdigest()
+            source = base64.b64decode(api(f"{repo}/git/blobs/{blobs[name]}")["content"])
+            if digest != manifest.get(name) or data.replace(b"\r\n", b"\n") != source.replace(b"\r\n", b"\n"):
+                raise ValueError(f"{member} differs from the SHA-256 manifest or the build commit")
+            print(f"Verified {member}  {len(data)} bytes  sha256:{digest}", flush=True)
 
 
 def fetch_archives(repo, run_id, folder):
@@ -40,6 +63,7 @@ def fetch_archives(repo, run_id, folder):
             raise ValueError(f"Build artifact digest mismatch: {name}")
         digests[name] = digest
         print(f"{name}  {digest}", flush=True)
+    verify_readmes(repo, run["head_sha"], folder / base)
     return run, "v" + base.removeprefix("SyncSyncAV_").removesuffix(".zip"), digests
 
 

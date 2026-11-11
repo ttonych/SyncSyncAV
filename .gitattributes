@@ -1,0 +1,7 @@
+*.patch -text
+*.diff -text
+*.xz binary
+*.ttf binary
+*.ico binary
+*.png binary
+.githooks/* text eol=lf

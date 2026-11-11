@@ -1,0 +1,335 @@
+<?xml version='1.0' encoding='utf-8'?>
+<strings>
+  <text key="AppName" ru="SyncSyncAV" en="SyncSyncAV" />
+  <text key="FindingWindows" ru="Поиск окон VirtualDub2…" en="Looking for VirtualDub2 windows…" />
+  <text key="LastActionHint" ru="Последнее действие. Нажмите для подробностей." en="Last action. Click for details." />
+  <text key="ShiftStepHint" ru="Шаг с Shift. Ctrl+Shift — вдвое больше; Ctrl+Shift+Z — повтор." en="Hold Shift for the selected step or Ctrl+Shift for twice that step. Ctrl+Shift+Z redoes the last action." />
+  <text key="ShiftStep" ru="Шаг с Shift" en="Shift step" />
+  <text key="Shift10" ru="Шаг Shift: 10" en="Shift step: 10" />
+  <text key="Shift24" ru="Шаг Shift: 24" en="Shift step: 24" />
+  <text key="Shift48" ru="Шаг Shift: 48" en="Shift step: 48" />
+  <text key="SwapSides" ru="Поменять A и B местами" en="Swap A and B" />
+  <text key="TileWindows" ru="Окна рядом" en="Tile windows" />
+  <text key="RestoreLayout" ru="Вернуть расположение" en="Restore layout" />
+  <text key="Settings" ru="Настройки" en="Settings" />
+  <text key="MinimizeController" ru="Свернуть пульт" en="Minimize controller" />
+  <text key="CloseControllerHint" ru="Закрыть пульт; VirtualDub2 останутся открытыми" en="Close the controller and leave VirtualDub2 open" />
+  <text key="VideoA" ru="Видео A" en="Video A" />
+  <text key="ChooseWindow" ru="Выберите окно" en="Select a window" />
+  <text key="Disconnected" ru="Нет подключения" en="Disconnected" />
+  <text key="FrameHeadingA" ru="КАДР A" en="FRAME A" />
+  <text key="BothVideos" ru="ОБА ВИДЕО" en="BOTH VIDEOS" />
+  <text key="NoPointsCount" ru="Точки синхронизации · 0" en="Sync points · 0" />
+  <text key="FrameHeadingB" ru="КАДР B" en="FRAME B" />
+  <text key="FrameA" ru="Кадр A" en="Frame A" />
+  <text key="FrameEntryHint" ru="Номер кадра или сдвиг +24 / −100. Enter — перейти, Esc — отменить." en="Enter a frame number or an offset such as +24 or −100. Enter to go, Esc to cancel." />
+  <text key="ToggleLink" ru="Переключить связь" en="Toggle link" />
+  <text key="ApplySavedLink" ru="Применить сохранённое смещение и включить связь (L)" en="Apply the saved offset and link the videos (L)" />
+  <text key="LinkHeading" ru="СВЯЗЬ" en="LINK" />
+  <text key="Linked" ru="Связаны" en="Linked" />
+  <text key="OffsetHeading" ru="СМЕЩЕНИЕ" en="OFFSET" />
+  <text key="ToggleDirection" ru="Переключить направление смещения" en="Switch offset direction" />
+  <text key="OffsetRelativeA" ru="Смещение A относительно B" en="Offset of A relative to B" />
+  <text key="ResetOffsetName" ru="Сбросить смещение в ноль" en="Reset offset to zero" />
+  <text key="ResetOffset" ru="Сбросить смещение в 0" en="Reset offset to 0" />
+  <text key="CopyOffset" ru="Скопировать смещение" en="Copy offset" />
+  <text key="NoMilliseconds" ru="— мс" en="— ms" />
+  <text key="Anchor" ru="Зафиксировать пару" en="Set sync point" />
+  <text key="FrameB" ru="Кадр B" en="Frame B" />
+  <text key="NudgeALeftHint" ru="Только A: −1. При связи изменится смещение. Shift — крупный шаг." en="A only: −1. Adjusts the offset when linked. Hold Shift for a larger step." />
+  <text key="NudgeARight" ru="Только A: +1" en="A only: +1" />
+  <text key="BothBackName" ru="Общий шаг назад" en="Step both videos back" />
+  <text key="Back" ru="Назад" en="Back" />
+  <text key="BothForwardName" ru="Общий шаг вперёд" en="Step both videos forward" />
+  <text key="Forward" ru="Вперёд" en="Forward" />
+  <text key="NudgeBLeftHint" ru="Только B: −1. При связи изменится смещение." en="B only: −1. Adjusts the offset when linked." />
+  <text key="NudgeBRight" ru="Только B: +1" en="B only: +1" />
+  <text key="VideoB" ru="Видео B" en="Video B" />
+  <text key="Swapping" ru="Меняем A и B…" en="Swapping A and B…" />
+  <text key="Tiling" ru="Размещаем окна…" en="Arranging windows…" />
+  <text key="Tiled" ru="A слева · B справа · пульт снизу. Прежнее расположение запомнено." en="A on the left, B on the right, controller below. Previous layout saved." />
+  <text key="RestoringLayout" ru="Возвращаем расположение…" en="Restoring layout…" />
+  <text key="LastAction" ru="Последнее действие" en="Last action" />
+  <text key="NoSdkWindows" ru="SDK-окна не найдены. Запустите VirtualDub2 из сборки SDK v5 и откройте «Настройки»." en="No SDK windows found. Start VirtualDub2 from the SDK v5 build and open Settings." />
+  <text key="HostKeysUnavailable" ru="Клавиши в VirtualDub2 недоступны: " en="Video window shortcuts are unavailable: " />
+  <text key="ShellKeysAvailable" ru=" Клавиши пульта работают." en=" Controller shortcuts still work." />
+  <text key="SharedStepPrefix" ru="Общий шаг работает" en="Linked stepping requires" />
+  <text key="CheckingFrames" ru="Проверка кадров…" en="Checking frames…" />
+  <text key="EnterFrame" ru="Введите целый номер кадра или сдвиг: +24, −100." en="Enter a whole frame number or an offset such as +24 or −100." />
+  <text key="NegativeFrame" ru="Номер кадра не может быть отрицательным." en="Frame numbers cannot be negative." />
+  <text key="OffsetOverflow" ru="Смещение выходит за допустимый диапазон." en="Offset is out of range." />
+  <text key="Redoing" ru="Повтор…" en="Redoing…" />
+  <text key="Undoing" ru="Отмена…" en="Undoing…" />
+  <text key="ZeroBasedFrames" ru="Кадры с нуля" en="Frame numbers start at zero" />
+  <text key="OpenVideo" ru="Откройте видео" en="Open a video" />
+  <text key="MissingMetadata" ru="Параметры видео недоступны" en="Video details unavailable" />
+  <text key="FpsUnit" ru=" к/с · " en=" fps · " />
+  <text key="MissingMetadataHint" ru="Параметры недоступны. Для MKV, AVI и index.bdmv нужен обновлённый модуль ввода и мост 1.1." en="Video details are unavailable. MKV, AVI and index.bdmv require the updated input plugin and bridge 1.1." />
+  <text key="StreamMetadata" ru="Параметры открытого видеопотока из VirtualDub2. Таймкод рассчитан по частоте исходника.&#10;" en="Stream details from VirtualDub2. Timecode uses the source frame rate.&#10;" />
+  <text key="DiscMetadata" ru="Частота и формат основного потока из CLPI. Таймкод рассчитан по частоте исходника." en="Main stream details from CLPI. Timecode uses the source frame rate." />
+  <text key="NoVideoLoaded" ru="Нет открытого видео" en="No video open" />
+  <text key="FramesUnit" ru=" кадров" en=" frames" />
+  <text key="PreviewUnavailable" ru="Просмотр недоступен" en="Preview unavailable" />
+  <text key="PreviewBusy" ru="Открыт диалог или идёт операция" en="Dialog open or operation in progress" />
+  <text key="EmbeddedPreview" ru="Встроенный просмотр" en="Embedded preview" />
+  <text key="ReadyToOpen" ru="Готов к открытию" en="Ready to open" />
+  <text key="UnavailablePid" ru="Недоступно · PID " en="Unavailable · PID " />
+  <text key="BusyPid" ru="Занято · PID " en="Busy · PID " />
+  <text key="HostPid" ru="Окно VirtualDub2 · PID " en="VirtualDub2 · PID " />
+  <text key="VideoNotOpen" ru="Видео не открыто" en="No video open" />
+  <text key="TimelineEnd" ru="Конец шкалы" en="End of timeline" />
+  <text key="Unlinked" ru="Раздельно" en="Unlinked" />
+  <text key="OffsetInactive" ru="НЕ ПРИМЕНЯЕТСЯ" en="NOT APPLIED" />
+  <text key="SwitchFormulaIntro" ru=" + смещение. Нажмите, чтобы переключить на " en=" + offset. Click to switch to " />
+  <text key="SwitchFormulaEnd" ru=". Меняется знак отображения; выбранные кадры сохраняются." en=". Changes the displayed sign and keeps the selected frames." />
+  <text key="OffsetDirection" ru="Направление смещения: " en="Offset direction: " />
+  <text key="SwitchDirectionAction" ru=". Переключить" en=". Switch direction" />
+  <text key="OffsetRelativeB" ru="Смещение B относительно A" en="Offset of B relative to A" />
+  <text key="ApplyOffsetHint" ru=" + смещение. Enter — применить; при связи подстраивается кадр B, если границы файлов позволяют сохранить A." en=" + offset. Press Enter to apply. When linked, B moves if A can stay within the shared range." />
+  <text key="CopyValue" ru="Скопировать: " en="Copy: " />
+  <text key="StoredOffsetHint" ru="&#10;Сохранённое смещение; связь выключена." en="&#10;Saved offset. Videos are unlinked." />
+  <text key="ResetAndAlign" ru="Сбросить смещение в 0 и выровнять кадры A/B" en="Reset offset to 0 and align A and B" />
+  <text key="ResetAndKeep" ru="Сбросить смещение в 0; кадры останутся на месте" en="Reset offset to 0 and keep both frames" />
+  <text key="StepUnitsWithDouble" ru=" кадр(ов) · Ctrl+Shift: " en=" frames · Ctrl+Shift: " />
+  <text key="Selected" ru="Выбран" en="Selected" />
+  <text key="OpenBothVideos" ru="Откройте оба видео" en="Open both videos" />
+  <text key="SelectTwoWindows" ru="Выберите два окна" en="Select two windows" />
+  <text key="DifferentRates" ru="РАЗНАЯ ЧАСТОТА КАДРОВ" en="FRAME RATES DIFFER" />
+  <text key="MillisecondsUnit" ru=" мс" en=" ms" />
+  <text key="MsCalculation" ru="Смещение в кадрах × 1000 / " en="Frame offset × 1000 / " />
+  <text key="MsRounding" ru=" к/с. До целой миллисекунды, как таймкод в строке состояния VirtualDub2." en=" fps. Rounded to the nearest millisecond, as in the VirtualDub2 timecode." />
+  <text key="NeedSameRate" ru="Для перевода смещения в миллисекунды нужна известная одинаковая частота обоих видео." en="Both videos must have the same known frame rate to calculate milliseconds." />
+  <text key="DifferentRatesHint" ru="Постоянное смещение не компенсирует разную частоту. Навигация остаётся покадровой; коэффициент скорости не применяется." en="A fixed offset cannot correct a frame rate difference. Navigation uses the original frames without speed conversion." />
+  <text key="SettingsReadFailure" ru="Файл сохранённых точек не прочитан. Он сохранён без изменений; новые точки пока не записываются." en="Could not read saved settings. The original file is preserved. New sync points will only be available in this session." />
+  <text key="SettingsWriteFailure" ru="Точки работают в этом сеансе, но не сохранены: " en="Sync points are available in this session but could not be saved: " />
+  <text key="NoVideoShort" ru="нет видео" en="no video" />
+  <text key="ServerPidMismatch" ru="PID сервера не совпадает с выбранным окном." en="Server PID does not match the selected window." />
+  <text key="SdkClosed" ru="SDK закрыл соединение до ответа." en="The SDK closed the connection before replying." />
+  <text key="SdkReplyTooLarge" ru="Ответ SDK слишком большой." en="SDK reply is too large." />
+  <text key="ReplyIdMismatch" ru="Номер ответа SDK не совпадает с запросом." en="SDK reply ID does not match the request." />
+  <text key="WrongProcess" ru="Ответ пришёл от другого процесса." en="Reply came from another process." />
+  <text key="UnsupportedBridge" ru="Неподдерживаемый SDK-мост." en="Unsupported SDK bridge." />
+  <text key="InvalidHostFrame" ru="SDK вернул некорректную позицию или длину." en="SDK returned an invalid position or duration." />
+  <text key="WindowPrefix" ru="Окно " en="Window " />
+  <text key="TimedOut" ru=" не ответило вовремя." en=" timed out." />
+  <text key="WindowChanged" ru="Окно закрыто или изменилось." en="The window was closed or changed." />
+  <text key="LayoutUnconfirmed" ru="Окно не подтвердило расположение. Используйте «Вернуть расположение»." en="The window did not confirm the layout. Use Restore layout." />
+  <text key="NeedFreeWindows" ru="Нужны два разных свободных окна VirtualDub2." en="Select two different, idle VirtualDub2 windows." />
+  <text key="PairChanged" ru="Пара изменилась. Сначала верните прежнее расположение." en="The pair changed. Restore the previous layout first." />
+  <text key="MonitorTooSmall" ru="На этом мониторе недостаточно места для пульта. Перенесите его на больший экран." en="There is not enough room for the controller on this monitor. Move it to a larger screen." />
+  <text key="PartialRestore" ru="Не все окна ответили. Повторите возврат расположения после закрытия диалогов." en="Some windows did not respond. Close any open dialogs and try restoring the layout again." />
+  <text key="LayoutRestored" ru="Прежнее расположение восстановлено." en="Previous layout restored." />
+  <text key="SkippedClosed" ru=" Закрытых окон пропущено: " en=" Closed windows skipped: " />
+  <text key="UnknownRate" ru="Частота кадров неизвестна." en="Frame rate unknown." />
+  <text key="Video" ru="Видео" en="Video" />
+  <text key="AttachFailed" ru="Не удалось привязать встроенный просмотр к программе." en="Could not attach the embedded preview to the application." />
+  <text key="PaneNotCreated" ru="Панель просмотра ещё не создана." en="The preview pane has not been created yet." />
+  <text key="PreviewAlreadyRunning" ru="Просмотр уже запущен." en="Preview is already running." />
+  <text key="MissingEngine" ru="Не найден встроенный движок." en="Embedded engine not found." />
+  <text key="EngineExitedAtStart" ru="Движок завершился при запуске." en="The engine exited during startup." />
+  <text key="WrongEngineWindow" ru="Движок вернул чужое окно." en="The engine returned a window owned by another process." />
+  <text key="EmbedUnconfirmed" ru="Окно не подтвердило встраивание." en="The window did not confirm that it was embedded." />
+  <text key="PreviewNotRunning" ru="Просмотр не запущен." en="Preview is not running." />
+  <text key="PreviewNotReady" ru="Просмотр недоступен или занят." en="Preview is unavailable or busy." />
+  <text key="DropRejected" ru="Просмотр не принял файл: " en="The preview did not accept the file: " />
+  <text key="CloseMediaFailed" ru="Не удалось закрыть видео в панели." en="Could not close the video in this pane." />
+  <text key="WindowTitle" ru="SyncSyncAV · два видео" en="SyncSyncAV · Dual video preview" />
+  <text key="Minimize" ru="Свернуть" en="Minimize" />
+  <text key="Maximize" ru="Развернуть" en="Maximize" />
+  <text key="RestoreSize" ru="Восстановить размер" en="Restore window size" />
+  <text key="CloseApp" ru="Закрыть программу" en="Close application" />
+  <text key="Remove" ru="Убрать" en="Remove" />
+  <text key="OpenVideoPrefix" ru="Открыть видео " en="Open video " />
+  <text key="StartingPreview" ru="Запуск просмотра…" en="Starting preview…" />
+  <text key="VideoPrefix" ru="Видео " en="Video " />
+  <text key="NotOpenSuffix" ru=" не открыто" en=" is not open" />
+  <text key="ChangePlaylist" ru="Сменить плейлист…" en="Change playlist…" />
+  <text key="ChoosingPlaylist" ru="Выберите плейлист Blu-ray." en="Choose a Blu-ray playlist." />
+  <text key="PlaylistKept" ru="Оставлен текущий плейлист." en="Kept the current playlist." />
+  <text key="PlaylistChangeFailed" ru="Не удалось сменить плейлист." en="Could not change the playlist." />
+  <text key="DropVideoHere" ru="Или перетащите видео, ISO, диск Blu-ray или папку BDMV" en="Or drop a video, ISO, Blu-ray disc or BDMV folder" />
+  <text key="DropExistingFile" ru="Перетащите видео, образ Blu-ray ISO, корень диска или папку BDMV. В BDMV нужны файл index.bdmv и папка PLAYLIST." en="Drop a video, a Blu-ray ISO image, a disc root or its BDMV folder. BDMV must contain index.bdmv and a PLAYLIST folder." />
+  <text key="OpeningVideo" ru="Открываем видео…" en="Opening video…" />
+  <text key="ClosingVideoPrefix" ru="Закрываем видео " en="Closing video " />
+  <text key="ClosedSuffix" ru=" закрыто." en=" closed." />
+  <text key="PreviewPrefix" ru="Просмотр " en="Preview " />
+  <text key="CloseNotConfirmed" ru=" не подтвердил закрытие видео." en=" did not confirm that the video closed." />
+  <text key="PreviewRestored" ru="Просмотр восстановлен…" en="Preview restarted…" />
+  <text key="PreviewsReady" ru="Просмотры готовы…" en="Previews ready…" />
+  <text key="StartupHint" ru="Откройте видео A и B. Найдите совпадающие кадры и зафиксируйте пару." en="Open videos A and B, find matching frames, then set a sync point." />
+  <text key="CheckingPreviews" ru="Проверяем доступные просмотры…" en="Checking available previews…" />
+  <text key="StartPreviewsFailed" ru="Не удалось запустить просмотры: " en="Could not start the previews: " />
+  <text key="Replace" ru="Заменить…" en="Replace…" />
+  <text key="OpenInPane" ru="Открыть другое видео в панели " en="Open another video in pane " />
+  <text key="RestartPrefix" ru="Перезапустить " en="Restart " />
+  <text key="StartingPreviewPrefix" ru="Запуск просмотра " en="Starting preview " />
+  <text key="UnavailableSuffix" ru=" недоступен" en=" is unavailable" />
+  <text key="EngineStopped" ru="Один просмотр завершился. Нажмите «Перезапустить» над его панелью." en="A preview stopped. Click Restart in its pane." />
+  <text key="StopBeforeExit" ru="Закройте диалог в просмотре или остановите воспроизведение, затем закройте программу." en="Close the preview dialog or stop playback before exiting the application." />
+  <text key="KeysHeading" ru="КЛАВИШИ" en="SHORTCUTS" />
+  <text key="KeysInVideo" ru="Клавиши пульта работают и в видео" en="Use controller shortcuts in video panes" />
+  <text key="ShowKeyHints" ru="Показывать подсказки клавиш" en="Show shortcut hints" />
+  <text key="EmbeddedKeyGuide" ru="← / → — общий шаг · A / S — видео A · D / F — видео B&#10;K — сохранить пару · L — связь · G / H — кадр&#10;O — смещение · Shift — выбранный шаг&#10;Ctrl+Shift — удвоенный шаг (← → A S D F)&#10;Ctrl+Z — отмена · Ctrl+Y / Ctrl+Shift+Z — повтор" en="← / → — step together · A / S — video A · D / F — video B&#10;K — set sync point · L — link · G / H — go to frame&#10;O — offset · Shift — selected step&#10;Ctrl+Shift — double step (← → A S D F)&#10;Ctrl+Z — undo · Ctrl+Y / Ctrl+Shift+Z — redo" />
+  <text key="OffsetMode" ru="Режим смещения: " en="Offset direction: " />
+  <text key="FramesRetained" ru=". Пара кадров сохранена." en=". Frame positions preserved." />
+  <text key="ChooseOffset" ru="Откройте оба видео и выберите смещение." en="Open both videos and select an offset." />
+  <text key="Copied" ru="Скопировано: " en="Copied: " />
+  <text key="ClipboardBusy" ru="Буфер обмена занят. Повторите копирование." en="Clipboard is busy. Try copying again." />
+  <text key="CopySettingsHeading" ru="КОПИРОВАНИЕ СМЕЩЕНИЯ" en="COPY OFFSET" />
+  <text key="CopyTemplateHint" ru="Шаблон текста для кнопки копирования рядом со смещением." en="Choose what the copy button puts on the clipboard." />
+  <text key="CopyTemplateName" ru="Шаблон копирования смещения" en="Offset copy template" />
+  <text key="CopyTokensHint" ru="{frames} — кадры · {ms} — целые миллисекунды.&#10;Знак берётся из режима A = B / B = A на пульте." en="{frames} — frames · {ms} — whole milliseconds.&#10;The sign follows the A = B / B = A setting." />
+  <text key="Example" ru="Пример: " en="Example: " />
+  <text key="TemplateSaved" ru="Шаблон копирования сохранён." en="Copy template saved." />
+  <text key="Save" ru="Сохранить" en="Save" />
+  <text key="UseDefault" ru="По умолчанию" en="Use default" />
+  <text key="TemplateLength" ru="Шаблон должен содержать от 1 до 256 символов." en="Enter a template between 1 and 256 characters." />
+  <text key="TemplateTokens" ru="Доступны только подстановки {frames} и {ms}." en="Only {frames} and {ms} placeholders are supported." />
+  <text key="TemplateNeedsValue" ru="Добавьте {frames} или {ms}, чтобы скопировать значение смещения." en="Add {frames} or {ms} to include the offset." />
+  <text key="TemplateNeedsFps" ru="Для {ms} нужна известная одинаковая частота обоих видео. Можно использовать шаблон только с {frames}." en="{ms} requires matching, known frame rates. You can use a template with just {frames}." />
+  <text key="ClosePrefix" ru="Закрыть " en="Close " />
+  <text key="NoVideo" ru="Нет видео" en="No video" />
+  <text key="ConnectingWindows" ru="Подключаем выбранные окна…" en="Connecting selected windows…" />
+  <text key="DuplicateSelection" ru="Для A и B выбрано одно окно. Выберите разные окна." en="The same window is selected for A and B. Select two different windows." />
+  <text key="WindowsSelected" ru="Окна выбраны. Связь выключена; зафиксируйте новую пару." en="Windows selected. Videos are unlinked. Set a new sync point." />
+  <text key="Scanning" ru="Ищем окна…" en="Looking for windows…" />
+  <text key="WindowsFound" ru="Найдено окон: " en="Windows found: " />
+  <text key="WindowWithoutBridge" ru="окно VirtualDub2 без моста" en="VirtualDub2 window without a bridge" />
+  <text key="WindowsWithoutBridge" ru="окна VirtualDub2 без моста" en="VirtualDub2 windows without a bridge" />
+  <text key="SdkOpenHint" ru=" — откройте видео в сборке SDK v5" en=" — open a video in the SDK v5 build" />
+  <text key="ScanIncomplete" ru="Поиск не завершён" en="Search incomplete" />
+  <text key="WindowsHeading" ru="ОКНА VIRTUALDUB2" en="VIRTUALDUB2 WINDOWS" />
+  <text key="LeftWindow" ru="A · Левое" en="A · Left" />
+  <text key="RightWindow" ru="B · Правое" en="B · Right" />
+  <text key="WindowChangeUnlinks" ru="Смена окна выключит связь." en="Changing a window unlinks the pair." />
+  <text key="SwapAction" ru="Поменять A и B" en="Swap A and B" />
+  <text key="SwapLayoutHint" ru="Если применено «Окна рядом», окна поменяются местами и на экране" en="If the windows are tiled, they also swap positions on screen" />
+  <text key="RefreshList" ru="Обновить список" en="Refresh list" />
+  <text key="KeysInWindows" ru="Работают и в окнах VirtualDub2" en="Enable shortcuts in VirtualDub2 windows" />
+  <text key="ShowButtonKeys" ru="Показывать клавиши на кнопках" en="Show shortcuts on buttons" />
+  <text key="FramesFew" ru=" кадра" en=" frames" />
+  <text key="ControllerHeading" ru="ПУЛЬТ" en="CONTROLLER" />
+  <text key="AlwaysOnTop" ru="Поверх остальных окон" en="Always on top" />
+  <text key="AllShortcuts" ru="Все клавиши ›" en="All shortcuts ›" />
+  <text key="WindowKeyGuide" ru="← / → — общий шаг при связи&#10;A / S — кадр A · D / F — кадр B&#10;G / H — ввод кадра · O — смещение&#10;L — связь · K — зафиксировать пару&#10;Shift — крупный шаг&#10;Ctrl+Z — отмена пульта&#10;Ctrl+Shift+Z / Ctrl+Y — повтор пульта&#10;Отмена и повтор пульта работают в пульте и его панелях. В окнах VirtualDub2 остаётся их собственная отмена." en="← / → — step together when linked&#10;A / S — step A · D / F — step B&#10;G / H — go to frame · O — offset&#10;L — link · K — set sync point&#10;Shift — larger step&#10;Ctrl+Z — undo controller action&#10;Ctrl+Shift+Z / Ctrl+Y — redo controller action&#10;Controller undo and redo work in the controller and its panels. VirtualDub2 windows keep their own undo history." />
+  <text key="SyncPoints" ru="Точки синхронизации" en="Sync points" />
+  <text key="PointsHint" ru="Найдите совпадающие кадры A и B и сохраните пару. «Вернуть» восстановит оба кадра, смещение и включит связь." en="Find matching frames in A and B and save the pair. Recall restores both frames, applies the offset and links the videos." />
+  <text key="SavePoint" ru="Сохранить текущую пару · K" en="Save current pair · K" />
+  <text key="LabelHeading" ru="МЕТКА" en="LABEL" />
+  <text key="Recall" ru="Вернуть" en="Recall" />
+  <text key="RecallingPoint" ru="Возврат к точке…" en="Recalling sync point…" />
+  <text key="GoToAPrefix" ru="Перейти к A " en="Go to A " />
+  <text key="AndB" ru=" и B " en=" and B " />
+  <text key="ThenLink" ru="; включить связь " en=" and link with offset " />
+  <text key="DeletePoint" ru="Удалить точку " en="Delete sync point " />
+  <text key="NoPoints" ru="Для этой пары видео пока нет сохранённых точек." en="No sync points saved for this pair of videos yet." />
+  <text key="PointsPersist" ru="Точки сохраняются между запусками. Смещение по точкам автоматически не переключается." en="Sync points are saved between sessions. Recall a point to apply its offset." />
+  <text key="PointsCount" ru="Точки синхронизации · " en="Sync points · " />
+  <text key="StatusDetail" ru="&#10;&#10;Подтверждается позиция шкалы. Завершение показа изображения не подтверждается; слежение за ручной перемоткой идёт по опросу. Синхронное воспроизведение не гарантируется." en="&#10;&#10;Positions are confirmed on the timeline. Manual seeks are followed by polling. The engine does not confirm when a frame is displayed or guarantee synchronized playback." />
+  <text key="NudgeAMinusHint" ru="Только A: −1 (A). Shift — выбранный шаг; Ctrl+Shift — двойной." en="Step A back one frame (A). Shift uses the selected step. Ctrl+Shift doubles it." />
+  <text key="NudgeAPlusHint" ru="Только A: +1 (S). Shift — выбранный шаг; Ctrl+Shift — двойной." en="Step A forward one frame (S). Shift uses the selected step. Ctrl+Shift doubles it." />
+  <text key="NudgeBMinusHint" ru="Только B: −1 (D). Shift — выбранный шаг; Ctrl+Shift — двойной." en="Step B back one frame (D). Shift uses the selected step. Ctrl+Shift doubles it." />
+  <text key="NudgeBPlusHint" ru="Только B: +1 (F). Shift — выбранный шаг; Ctrl+Shift — двойной." en="Step B forward one frame (F). Shift uses the selected step. Ctrl+Shift doubles it." />
+  <text key="AnchorHint" ru="Сохранить текущую пару кадров как точку синхронизации и включить связь (K). Вернуться к ней можно в «Точках синхронизации»." en="Save these frames as a sync point and link the videos (K). Use Sync points to recall the pair." />
+  <text key="UnlinkHint" ru="Выключить связь: A и B будут двигаться отдельно (L)" en="Unlink A and B for independent navigation (L)" />
+  <text key="LinkOffsetHint" ru="Включить связь со смещением " en="Link with offset " />
+  <text key="BMovesTo" ru=": B перейдёт на " en=". B will move to " />
+  <text key="BothStepHint" ru="Оба видео на кадр " en="Step both videos one frame " />
+  <text key="Backward" ru="назад" en="back" />
+  <text key="ForwardDirection" ru="вперёд" en="forward" />
+  <text key="ShiftMoves" ru=" · Shift — на " en=" · Shift: " />
+  <text key="DoubleMoves" ru=" · Ctrl+Shift — на " en=" · Ctrl+Shift: " />
+  <text key="LinkedStepHint" ru="Общий шаг работает при включённой связи" en="Link the videos to step them together" />
+  <text key="FrameEditHint" ru="Enter — перейти · Esc — отмена" en="Enter to go · Esc to cancel" />
+  <text key="StartupError" ru="SyncSyncAV — ошибка запуска" en="SyncSyncAV — startup error" />
+  <text key="NoSharedRange" ru="При таком смещении общей пары кадров нет." en="No frame pair is available at this offset." />
+  <text key="LinkRequired" ru="Общий шаг работает при связи. Включите её или зафиксируйте пару." en="Linked stepping requires a linked pair. Turn linking on or set a sync point." />
+  <text key="SharedStep" ru="Общий шаг" en="Linked step" />
+  <text key="EmptyWindow" ru="В выбранном окне нет видео." en="No video in the selected window." />
+  <text key="NudgePrefix" ru="Подстройка " en="Adjust " />
+  <text key="GoToPrefix" ru="Переход " en="Go to " />
+  <text key="OffsetApplied" ru="Смещение применено" en="Offset applied" />
+  <text key="OffsetSaved" ru="Смещение сохранено; применится при включении связи" en="Offset saved. It will apply when the videos are linked" />
+  <text key="LinkOn" ru="Связь включена" en="Videos linked" />
+  <text key="LinkOff" ru="Связь выключена" en="Videos unlinked" />
+  <text key="ChooseFrame" ru="Выберите реальные кадры, а не позицию End после файла." en="Select a frame within the video. End is past the last frame." />
+  <text key="PairAnchored" ru="Пара зафиксирована" en="Sync point set" />
+  <text key="MissingPair" ru="Нет сохранённой пары." en="No saved pair." />
+  <text key="PointOutsideVideo" ru="Сохранённая пара выходит за границы текущих файлов." en="The saved pair falls outside the current videos." />
+  <text key="InvalidSavedLink" ru="Некорректная сохранённая связь." en="Invalid saved link." />
+  <text key="PairRestored" ru="Пара восстановлена" en="Frame pair restored" />
+  <text key="UnknownAction" ru="Неизвестное действие: " en="Unknown action: " />
+  <text key="WindowBusySuffix" ru=" недоступно или занято." en=" is unavailable or busy." />
+  <text key="SourceChanged" ru="Источник или монтажная шкала изменились. Связь выключена; зафиксируйте новую пару." en="The source or timeline changed. Videos are unlinked. Set a new sync point." />
+  <text key="NoReply" ru="Нет ответа от " en="No response from " />
+  <text key="LinkOffDetail" ru=". Связь выключена. " en=". Videos are unlinked. " />
+  <text key="InitialLink" ru="Готово. Текущие кадры связаны; окна ещё не перемещались." en="Ready. Current frames are linked. Window positions have been preserved." />
+  <text key="DuplicateWindow" ru="Для A и B выбрано одно окно." en="A and B are using the same window." />
+  <text key="SelectionChanged" ru="Выбор окон изменён. Найдите совпадающие кадры и зафиксируйте пару." en="Window selection changed. Find matching frames and set a new sync point." />
+  <text key="SeekUnconfirmed" ru="Окно не подтвердило целевой кадр." en="The window did not confirm the target frame." />
+  <text key="PartialSeek" ru="Переход подтверждён не полностью. Фактические кадры прочитаны, связь выключена. " en="Seek only partially confirmed. Actual frames were read back and the videos were unlinked. " />
+  <text key="NoAutoRetry" ru=" Повтор и откат автоматически не выполняются." en=" No automatic retry or rollback was performed." />
+  <text key="SourceChangedCheck" ru="Источник изменился. Проверьте новую пару." en="The source changed. Check the new pair." />
+  <text key="SelectDistinctWindows" ru="Выберите два разных окна." en="Select two different windows." />
+  <text key="PointAlreadySaved" ru="Эта точка уже сохранена; пара связана" en="Sync point already saved. Videos linked" />
+  <text key="PointSaved" ru="Точка сохранена; пара связана" en="Sync point saved. Videos linked" />
+  <text key="Start" ru="Начало" en="Start" />
+  <text key="End" ru="Конец" en="End" />
+  <text key="StoppedAtBoundary" ru=" — движение остановлено." en=" — reached the limit." />
+  <text key="NothingToRedo" ru="Повторять нечего." en="Nothing to redo." />
+  <text key="NothingToUndo" ru="Отменять нечего." en="Nothing to undo." />
+  <text key="HistoryCleared" ru="Источник изменился; история очищена." en="Source changed. History cleared." />
+  <text key="Redone" ru="Повторено" en="Redone" />
+  <text key="Undone" ru="Отменено" en="Undone" />
+  <text key="PointDeleted" ru="Точка удалена." en="Sync point deleted." />
+  <text key="SwappedOffset" ru="A и B поменялись местами. Смещение " en="A and B swapped. Offset " />
+  <text key="BothMoved" ru="Оба окна перемещены независимо. Связь выключена; зафиксируйте нужную пару." en="Both windows moved independently. Videos are unlinked. Set the desired sync point." />
+  <text key="SharedBoundary" ru="Достигнута граница общей пары. Связь выключена; положение вручную выбранного окна сохранено." en="Reached the end of the shared range. Videos are unlinked. The manually selected frame is preserved." />
+  <text key="FollowingWindow" ru="Связанный переход из окна " en="Linked seek from window " />
+  <text key="Language" ru="Язык" en="Language" />
+  <text key="LanguageChanged" ru="Язык интерфейса — русский." en="Interface language set to English." />
+  <text key="CloseVideoA" ru="Закрыть видео A в этой панели" en="Close video A in this pane" />
+  <text key="CloseVideoB" ru="Закрыть видео B в этой панели" en="Close video B in this pane" />
+  <text key="RemoveVideoA" ru="Убрать видео A" en="Remove video A" />
+  <text key="RemoveVideoB" ru="Убрать видео B" en="Remove video B" />
+  <text key="InvalidMetadata" ru="Некорректные метаданные видео" en="Invalid video metadata" />
+  <text key="MissingObject" ru="Отсутствует объект " en="Missing object " />
+  <text key="MissingInteger" ru="Отсутствует целое число " en="Missing integer " />
+  <text key="InvalidInteger" ru="Некорректное целое число " en="Invalid integer " />
+  <text key="MissingString" ru="Отсутствует строка " en="Missing string " />
+  <text key="MissingBoolean" ru="Отсутствует логическое значение " en="Missing boolean " />
+  <bridge en="Invalid UTF-16 string" ru="Некорректная строка UTF-16" />
+  <bridge en="Payload is not valid UTF-8" ru="Данные запроса содержат некорректный UTF-8" />
+  <bridge en="Embedded NUL is not allowed" ru="Строка содержит нулевой символ" />
+  <bridge en="Timeline callback is unavailable" ru="Не удалось получить доступ к шкале времени" />
+  <bridge en="Unsupported timeline subset count" ru="Неподдерживаемое количество участков на шкале времени" />
+  <bridge en="Invalid timeline range" ru="Недопустимый диапазон на шкале времени" />
+  <bridge en="Request expired before execution" ru="Время ожидания истекло до выполнения запроса" />
+  <bridge en="The host raised an exception" ru="Ошибка VirtualDub2 при выполнении запроса" />
+  <bridge en="Host is busy or already embedded" ru="Окно VirtualDub2 занято или уже встроено" />
+  <bridge en="An existing window in the owning application is required" ru="Требуется окно приложения, запустившего VirtualDub2" />
+  <bridge en="Host normal menu is unavailable" ru="Основное меню VirtualDub2 недоступно" />
+  <bridge en="Host could not attach to the requested parent" ru="Не удалось встроить VirtualDub2 в указанную панель" />
+  <bridge en="The host is busy, modal, or has no editable video timeline" ru="VirtualDub2 занят, ожидает ответа в диалоге или не открыл шкалу времени" />
+  <bridge en="Open requires only a UTF-8 absolute file path" ru="Для открытия требуется абсолютный путь в UTF-8" />
+  <bridge en="An absolute path is required" ru="Требуется абсолютный путь" />
+  <bridge en="Unable to normalize the path" ru="Не удалось обработать путь к файлу" />
+  <bridge en="Open a specific MPLS file to avoid an interactive playlist chooser" ru="Откройте конкретный файл MPLS для работы без диалога выбора" />
+  <bridge en="The requested media file does not exist" ru="Видеофайл не найден" />
+  <bridge en="No video is open" ru="Видео не открыто" />
+  <bridge en="Seek/step does not accept flags or a payload" ru="Для перехода по кадрам дополнительные данные и флаги недопустимы" />
+  <bridge en="Frame arithmetic overflow" ru="Номер кадра выходит за допустимый числовой диапазон" />
+  <bridge en="Frame must be between 0 and frame_count - 1" ru="Номер кадра должен быть от 0 до количества кадров минус 1" />
+  <bridge en="The host did not select the requested frame (a zoomed timeline or another editor may own navigation)" ru="VirtualDub2 не перешёл к нужному кадру. Проверьте масштаб шкалы и открытые редакторы" />
+  <bridge en="View mode must be 0=input, 1=output, 2=both; flags=auto_fit" ru="Допустимые режимы просмотра: 0 — вход, 1 — выход, 2 — оба. Флаг: auto_fit" />
+  <bridge en="This host does not expose the verified presentation commands" ru="Эта версия VirtualDub2 не поддерживает команды управления просмотром" />
+  <bridge en="Presentation settings did not match the request" ru="Параметры просмотра отличаются от запрошенных" />
+  <bridge en="Unsupported operation code" ru="Неизвестный код операции" />
+  <bridge en="The host opened a different source or no video timeline" ru="VirtualDub2 открыл другой источник или не загрузил шкалу видео" />
+  <bridge en="Unable to read back the opened source" ru="Не удалось получить сведения об открытом источнике" />
+  <bridge en="Opening did not complete before the deadline" ru="Истекло время ожидания открытия видео" />
+  <bridge en="Unsupported or malformed protocol packet" ru="Пакет протокола повреждён или не поддерживается" />
+  <bridge en="State does not accept arguments" ru="Запрос состояния не принимает аргументы" />
+  <bridge en="The UI dispatcher is unavailable" ru="Диспетчер интерфейса недоступен" />
+  <bridge en="The request did not complete before the deadline" ru="Истекло время ожидания ответа" />
+</strings>

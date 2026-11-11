@@ -1,0 +1,10 @@
+{
+  "host": {
+    "url": "https://github.com/v0lt/VirtualDub2.git",
+    "revision": "0517034960aa341ec29c6d7cab1cb41d819ada20"
+  },
+  "decoder": {
+    "url": "https://github.com/v0lt/avlib_vdplugin.git",
+    "revision": "30cc99941f1726f9400f0ebfab2766f1c6267ed1"
+  }
+}

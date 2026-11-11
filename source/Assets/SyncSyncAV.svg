@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<title>SyncSyncAV</title>
+<rect x="6" y="6" width="244" height="244" rx="50" fill="#171a1e" stroke="#4b535c" stroke-width="4"/>
+<rect x="50" y="70" width="56" height="116" rx="4" fill="#252a30" stroke="#e3e6e9" stroke-width="12"/>
+<rect x="150" y="70" width="56" height="116" rx="4" fill="#252a30" stroke="#5db6c0" stroke-width="12"/>
+<path d="M96 128H160" stroke="#171a1e" stroke-width="28"/>
+<path d="M96 128H160" stroke="#e3e6e9" stroke-width="12" stroke-linecap="round"/>
+</svg>

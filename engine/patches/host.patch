@@ -1,0 +1,1535 @@
+diff --git a/src/Asuka/source/utils.cpp b/src/Asuka/source/utils.cpp
+index 9807159deef06220159509b6221a970b150bc986..1a203ca9de4c6974e9e8136aea95f4ab8db0f236 100644
+--- a/src/Asuka/source/utils.cpp
++++ b/src/Asuka/source/utils.cpp
+@@ -84,20 +84,7 @@ void canonicalize_name(VDStringA& name) {
+ }
+ 
+ std::string get_name() {
+-	char buf[256];
+-	DWORD siz = sizeof buf;
+-
+-	if (!GetComputerNameA(buf, &siz))		// hostname would probably work on a Unix platform
+-		buf[0] = 0;
+-
+-	std::string name(buf);
+-
+-	if (name.empty())
+-		name = "Anonymous";
+-	else
+-		canonicalize_name(name);
+-
+-	return name;
++	return "SyncSyncAV";
+ }
+ 
+ int get_version() {
+diff --git a/src/VirtualDub/h/project.h b/src/VirtualDub/h/project.h
+index 46ac9c924a54cc7657d3a6e3b9a6665454c98971..acca807223b6119ee817f64aa50d9188cb7e2cb0 100644
+--- a/src/VirtualDub/h/project.h
++++ b/src/VirtualDub/h/project.h
+@@ -205,7 +205,7 @@ public:
+ 	void OpenJob(const wchar_t *pFilename, VDJob* job);
+ 	void Open(const wchar_t *pFilename, IVDInputDriver *pSelectedDriver = 0, int open_flags = 0, int fAutoscan = 0, const char *pInputOpts = 0, uint32 inputOptsLen = 0);
+ 	void Reopen();
+-	void InnerReopen();
++	void InnerReopen(const wchar_t* playlistSource = NULL, const char* playlistOptions = NULL, uint32 playlistOptionsLen = 0);
+ 	void Reopen(FileNameCommand* cmd);
+ 	void OpenWAV(const wchar_t *pFilename, IVDInputDriver *pSelectedDriver = NULL, bool automated = false, bool extOpts = false, const void *optdata = NULL, int optlen = 0);
+ 	void CloseWAV();
+diff --git a/src/VirtualDub/res/VirtualDub.rc b/src/VirtualDub/res/VirtualDub.rc
+index 216c87e42e53083393dc4f79e85987420d082fd6..6d688803df7332834b2886f224021760ecba591b 100644
+--- a/src/VirtualDub/res/VirtualDub.rc
++++ b/src/VirtualDub/res/VirtualDub.rc
+@@ -2703,13 +2703,13 @@ IDD_OPENVIDEO DIALOGEX 0, 0, 456, 62
+ STYLE DS_SETFONT | DS_3DLOOK | DS_CONTROL | WS_CHILD | WS_CLIPSIBLINGS
+ FONT 8, "MS Shell Dlg", 0, 0, 0x0
+ BEGIN
+-    GROUPBOX        "Input driver",IDC_STATIC,7,3,284,52
+-    LTEXT           "Open &using:",IDC_STATIC,14,15,39,8
++    GROUPBOX        "Input driver",4911,7,3,284,52
++    LTEXT           "Open &using:",4912,14,15,39,8
+     COMBOBOX        IDC_DRIVER,58,14,173,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+     PUSHBUTTON      "Options...",IDC_DRIVER_OPTIONS,235,14,50,14
+     EDITTEXT        IDC_INFO_MSG,16,35,215,12,ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+     PUSHBUTTON      "File &Info...",IDC_DRIVER_INFO,235,34,50,14
+-    GROUPBOX        "Selection",IDC_STATIC,296,3,153,52
++    GROUPBOX        "Selection",4913,296,3,153,52
+     CONTROL         "Single file",IDC_OPEN_SINGLE,"Button",BS_AUTORADIOBUTTON | BS_NOTIFY | WS_GROUP,304,15,136,10
+     CONTROL         "Linked segments",IDC_OPEN_SEGMENTS,"Button",BS_AUTORADIOBUTTON | BS_NOTIFY,304,27,136,10
+     CONTROL         "Sequence",IDC_OPEN_SEQUENCE,"Button",BS_AUTORADIOBUTTON | BS_NOTIFY,304,39,136,10
+diff --git a/src/VirtualDub/source/EmbeddedTheme.h b/src/VirtualDub/source/EmbeddedTheme.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..4dbf4866e575ac849fb5c391e6baef531b1eb5ce
+--- /dev/null
++++ b/src/VirtualDub/source/EmbeddedTheme.h
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Palette shared by the integrated host surfaces. Ordinary VirtualDub is unchanged.
++#pragma once
++#include <windows.h>
++#include <commctrl.h>
++#include <vector>
++#include <string>
++extern bool g_VDStartEmbedded;
++extern bool g_VDEmbeddedRussian;
++namespace VDEmbeddedTheme {
++    const COLORREF Canvas=RGB(15,18,21), Panel=RGB(23,26,30), Status=RGB(18,21,24);
++    const COLORREF Border=RGB(52,58,65), Ink=RGB(227,230,233), Muted=RGB(121,130,139), Accent=RGB(93,182,192);
++    inline HBRUSH CanvasBrush(){static HBRUSH b=CreateSolidBrush(Canvas);return b;}
++    inline HBRUSH PanelBrush(){static HBRUSH b=CreateSolidBrush(Panel);return b;}
++    inline HBRUSH BorderBrush(){static HBRUSH b=CreateSolidBrush(Border);return b;}
++    inline HBRUSH AccentBrush(){static HBRUSH b=CreateSolidBrush(Accent);return b;}
++    inline HBRUSH StatusBrush(){static HBRUSH b=CreateSolidBrush(Status);return b;}
++    inline HFONT Font(HWND wnd){
++        static HFONT f=NULL;
++        if(!f){HDC dc=GetDC(wnd);int dpi=GetDeviceCaps(dc,LOGPIXELSY);ReleaseDC(wnd,dc);
++            f=CreateFontW(-MulDiv(12,dpi,96),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");}
++        return f;
++    }
++    inline LRESULT CALLBACK CanvasProc(HWND wnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
++        if(msg==WM_NCDESTROY)RemoveWindowSubclass(wnd,CanvasProc,id);
++        if(msg==WM_ERASEBKGND){RECT r;GetClientRect(wnd,&r);FillRect((HDC)wp,&r,CanvasBrush());return 1;}
++        if(msg==WM_CTLCOLORDLG)return (LRESULT)CanvasBrush();
++        return DefSubclassProc(wnd,msg,wp,lp);
++    }
++    inline void StatusMessage(HWND wnd,UINT msg,WPARAM wp,LPARAM lp){
++        const wchar_t* key=L"SyncSyncAV.StatusText";
++        auto text=(std::wstring*)GetPropW(wnd,key);
++        if(msg==WM_NCDESTROY){RemovePropW(wnd,key);delete text;return;}
++        if((msg==SB_SETTEXTW||msg==SB_SETTEXTA)&&(wp&255)==255&&!(wp&SBT_OWNERDRAW)){
++            if(!text){text=new std::wstring;if(!SetPropW(wnd,key,text)){delete text;return;}}
++            if(!lp)text->clear();
++            else if(msg==SB_SETTEXTW)*text=(const wchar_t*)lp;
++            else {int n=MultiByteToWideChar(CP_ACP,0,(const char*)lp,-1,NULL,0);std::vector<wchar_t> b(n);if(n){MultiByteToWideChar(CP_ACP,0,(const char*)lp,-1,b.data(),n);*text=b.data();}}
++            InvalidateRect(wnd,NULL,FALSE);
++        }
++    }
++    inline LRESULT PaintStatus(HWND wnd){
++        PAINTSTRUCT ps;HDC dc=BeginPaint(wnd,&ps);RECT rc;GetClientRect(wnd,&rc);
++        FillRect(dc,&rc,StatusBrush());RECT line=rc;line.bottom=1;FillRect(dc,&line,BorderBrush());
++        HGDIOBJ old=SelectObject(dc,Font(wnd));SetBkMode(dc,TRANSPARENT);SetTextColor(dc,Muted);
++        bool simple=SendMessageW(wnd,SB_ISSIMPLE,0,0)!=0;
++        int parts=simple?1:(int)SendMessageW(wnd,SB_GETPARTS,0,0);
++        for(int i=0;i<parts;i++){
++            int part=simple?SB_SIMPLEID:i;RECT r=rc;
++            if(!simple)SendMessageW(wnd,SB_GETRECT,i,(LPARAM)&r);
++            int count=LOWORD(SendMessageW(wnd,SB_GETTEXTLENGTHW,part,0));
++            std::vector<wchar_t> text(count+1);SendMessageW(wnd,SB_GETTEXTW,part,(LPARAM)text.data());
++            auto cached=(std::wstring*)GetPropW(wnd,L"SyncSyncAV.StatusText");
++            r.left+=8;r.right-=8;DrawTextW(dc,simple&&cached?cached->c_str():text.data(),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
++        }
++        SelectObject(dc,old);EndPaint(wnd,&ps);return 0;
++    }
++}
+diff --git a/src/VirtualDub/source/EmbeddedTransportIcons.h b/src/VirtualDub/source/EmbeddedTransportIcons.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..a195ecbdbfd0ed0f47e3b4a9fd4d76c59ef8f1e5
+--- /dev/null
++++ b/src/VirtualDub/source/EmbeddedTransportIcons.h
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++#include <objidl.h>
++#include <gdiplus.h>
++#pragma comment(lib,"gdiplus.lib")
++namespace VDEmbeddedTheme {
++    struct GdiPlusLifetime {ULONG_PTR token;GdiPlusLifetime(){Gdiplus::GdiplusStartupInput init;Gdiplus::GdiplusStartup(&token,&init,NULL);}~GdiPlusLifetime(){Gdiplus::GdiplusShutdown(token);}};
++    // Complete symbols have symmetric bounds. All dimensions scale with the button.
++    inline void TransportIcon(HDC dc,const RECT& rc,int symbol,COLORREF ink){
++        static GdiPlusLifetime session;
++        using namespace Gdiplus;
++        Graphics g(dc);g.SetSmoothingMode(SmoothingModeAntiAlias);g.SetPixelOffsetMode(PixelOffsetModeHalf);
++        const REAL u=(rc.bottom-rc.top)/24.0f;
++        REAL width=symbol==0?7.0f:symbol==1||symbol==2?6.0f:symbol>=3&&symbol<=8?9.0f:symbol==9||symbol==10?12.0f:5.0f;
++        REAL left=rc.left+((rc.right-rc.left)-width*u)/2,cy=(rc.top+rc.bottom)/2.0f;
++        SolidBrush brush(Color(255,GetRValue(ink),GetGValue(ink),GetBValue(ink)));
++        auto rect=[&](REAL x,REAL y,REAL ww,REAL hh){g.FillRectangle(&brush,left+x*u,cy+y*u,ww*u,hh*u);};
++        auto tri=[&](REAL x,bool right){PointF pts[3]={PointF(left+(x+(right?0:6))*u,cy-4*u),PointF(left+(x+(right?6:0))*u,cy),PointF(left+(x+(right?0:6))*u,cy+4*u)};g.FillPolygon(&brush,pts,3);};
++        if(symbol==0)rect(0,-3.5f,7,7);
++        else if(symbol==1||symbol==2){tri(0,true);}
++        else if(symbol>=3&&symbol<=8){
++            bool right=symbol==5||symbol==6||symbol==8;
++            bool barLeft=symbol==3||symbol==5||symbol==7;
++            REAL x=barLeft?3.0f:0.0f;rect(barLeft?0.0f:7.0f,-5,2,10);
++            if(symbol>=7){PointF pts[4]={PointF(left+(x+3)*u,cy-4*u),PointF(left+(x+6)*u,cy),PointF(left+(x+3)*u,cy+4*u),PointF(left+x*u,cy)};g.FillPolygon(&brush,pts,4);}
++            else tri(x,right);
++        } else if(symbol==9||symbol==10){tri(0,symbol==10);tri(6,symbol==10);}
++        else {bool right=symbol==12||symbol==14;rect(right?4.0f:0.0f,-5,1,10);rect(0,-5,5,1);rect(0,4,5,1);}
++    }
++}
+diff --git a/src/VirtualDub/source/ExplorerVideoDialog.inl b/src/VirtualDub/source/ExplorerVideoDialog.inl
+new file mode 100644
+index 0000000000000000000000000000000000000000..f65a079bee519e30cea2c9cb6e0b828ffea588e4
+--- /dev/null
++++ b/src/VirtualDub/source/ExplorerVideoDialog.inl
+@@ -0,0 +1,348 @@
++﻿// Windows Explorer's file picker for the embedded A/B panes.
++namespace {
++using Microsoft::WRL::ComPtr;
++
++void VDCheckPicker(HRESULT hr) {
++	if (FAILED(hr))
++		throw MyError(g_VDEmbeddedRussian ? L"Не удалось открыть диалог выбора файла (0x%08X)." :
++			L"Unable to open the file dialog (0x%08X).", (unsigned)hr);
++}
++
++VDStringW VDShellPath(IShellItem *item) {
++	PWSTR raw = nullptr;
++	VDStringW path;
++	if (item && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &raw))) {
++		path = raw;
++		CoTaskMemFree(raw);
++	}
++	return path;
++}
++
++constexpr DWORD kChooseFolderPlaylist = 4914;
++
++// Match the layouts accepted by the A/B drop targets, including extracted discs.
++VDStringW VDDiscFolderIndex(const VDStringW& folder) {
++	if (folder.empty()) return VDStringW();
++	auto indexIn = [](const VDStringW& bdmv) -> VDStringW {
++		VDStringW index = VDMakePath(bdmv.c_str(), L"index.bdmv");
++		DWORD attr = GetFileAttributesW(index.c_str());
++		if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) return VDStringW();
++		attr = GetFileAttributesW(VDMakePath(bdmv.c_str(), L"PLAYLIST").c_str());
++		return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) ? index : VDStringW();
++	};
++
++	VDStringW trimmed(folder);
++	while (!trimmed.empty() && (trimmed.back() == L'\\' || trimmed.back() == L'/'))
++		trimmed.pop_back();
++	if (!_wcsicmp(VDFileSplitPath(trimmed.c_str()), L"BDMV")) {
++		VDStringW index = indexIn(folder);
++		if (!index.empty()) return index;
++	}
++	return indexIn(VDMakePath(folder.c_str(), L"BDMV"));
++}
++
++class VDExplorerVideoEvents final : public Microsoft::WRL::RuntimeClass<
++	Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IFileDialogEvents, IFileDialogControlEvents> {
++public:
++	explicit VDExplorerVideoEvents(VDOpenVideoDialogW32& state) : mState(state) {}
++
++	void UpdateFile(const VDStringW& path) {
++		if (mState.filename != path) {
++			mState.filename = path;
++			mState.ChangeFilename();
++		}
++	}
++
++	VDStringW ChosenDiscIndex;
++
++	VDStringW TypedName() const {
++		PWSTR raw = nullptr;
++		if (!mDialog || FAILED(mDialog->GetFileName(&raw)) || !raw) return VDStringW();
++		VDStringW typed(raw);
++		CoTaskMemFree(raw);
++		return typed;
++	}
++
++	VDStringW ResolveName(const VDStringW& name) const {
++		if (name.empty() || !VDFileIsRelativePath(name.c_str())) return name;
++		ComPtr<IShellItem> folder;
++		if (FAILED(mDialog->GetFolder(&folder))) return VDStringW();
++		VDStringW base = VDShellPath(folder.Get());
++		return base.empty() ? VDStringW() : VDMakePath(base.c_str(), name.c_str());
++	}
++
++	void UpdateDiscButton() {
++		mState.custom->SetControlState(kChooseFolderPlaylist,
++			mSelectedIndex.empty() && mCurrentIndex.empty() ? CDCS_INACTIVE : CDCS_ENABLEDVISIBLE);
++	}
++
++	bool FinishFolder(const VDStringW& index) {
++		// Leave the file picker through its normal cancel path, outside the shell
++		// notification. There is no file result until the playlist has been chosen.
++		if (index.empty() || !mState.mhdlg ||
++			!PostMessageW(mState.mhdlg, WM_COMMAND, IDCANCEL, 0)) return false;
++		ChosenDiscIndex = index;
++		return true;
++	}
++
++	// The shell sends selection notifications for list items. Typing directly into
++	// the name field also needs to refresh the decoder controls before pressing Open.
++	void UpdateTypedName() {
++		VDStringW typed = TypedName();
++		if (typed == mLastTyped) return;
++		mLastTyped = typed;
++		if (!mSelectedIndex.empty() && typed == mNameAtSelection) return;
++		typed = ResolveName(typed);
++		if (typed.empty()) return;
++		DWORD attributes = GetFileAttributesW(typed.c_str());
++		if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY))
++			UpdateFile(typed);
++	}
++
++	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data) {
++		auto self = reinterpret_cast<VDExplorerVideoEvents *>(data);
++		if (msg == WM_COMMAND && LOWORD(wp) == IDOK) {
++			VDStringW name = self->TypedName();
++			// In Replace the shell can leave the previous video's name in the edit
++			// box after a folder is selected. An actual edit takes priority instead.
++			if (!self->mSelectedIndex.empty() && (name.empty() || name == self->mNameAtSelection) &&
++				self->FinishFolder(self->mSelectedIndex)) return 0;
++			VDStringW typed = self->ResolveName(name);
++			DWORD attr = typed.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(typed.c_str());
++			if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) &&
++				self->FinishFolder(VDDiscFolderIndex(typed))) return 0;
++		}
++		if (msg == WM_TIMER && wp == id) {
++			if (self->mState.init_error) {
++				auto error = self->mState.init_error;
++				self->mState.init_error = nullptr;
++				error->post(hwnd, g_szError);
++			}
++			self->UpdateTypedName();
++			return 0;
++		}
++		if (msg == WM_NCDESTROY)
++			self->RemoveTimer();
++		return DefSubclassProc(hwnd, msg, wp, lp);
++	}
++	void RemoveTimer() {
++		if (mState.mhdlg) {
++			UINT_PTR id = reinterpret_cast<UINT_PTR>(this);
++			KillTimer(mState.mhdlg, id);
++			RemoveWindowSubclass(mState.mhdlg, WindowProc, id);
++			mState.mhdlg = nullptr;
++		}
++	}
++
++	void Attach(IFileDialog *dialog) {
++		if (mState.mhdlg) return;
++		ComPtr<IOleWindow> window;
++		if (SUCCEEDED(dialog->QueryInterface(IID_PPV_ARGS(&window))) &&
++			SUCCEEDED(window->GetWindow(&mState.mhdlg)) && mState.mhdlg) {
++			mDialog = dialog;
++			UINT_PTR id = reinterpret_cast<UINT_PTR>(this);
++			if (SetWindowSubclass(mState.mhdlg, WindowProc, id, id))
++				SetTimer(mState.mhdlg, id, 250, nullptr);
++		}
++	}
++	void Detach() {
++		RemoveTimer();
++		mState.custom = nullptr;
++		mDialog = nullptr;
++	}
++
++	IFACEMETHODIMP OnFolderChanging(IFileDialog *, IShellItem *target) override {
++		// The initial and sidebar locations are navigation. Activating a selected
++		// item in the file list (including double-click/Enter) opens a disc.
++		mActivatedFolder.clear();
++		if (!mSelectedIndex.empty()) {
++			VDStringW path = VDShellPath(target);
++			if (VDFileIsPathEqual(path.c_str(), mSelectedFolder.c_str()))
++				mActivatedFolder = path;
++		}
++		return S_OK;
++	}
++	IFACEMETHODIMP OnFolderChange(IFileDialog *dialog) override {
++		Attach(dialog);
++		mLastTyped.clear();
++		ComPtr<IShellItem> current;
++		dialog->GetFolder(&current);
++		VDStringW path = VDShellPath(current.Get());
++		mCurrentIndex = VDDiscFolderIndex(path);
++		mSelectedFolder.clear();
++		mSelectedIndex.clear();
++		UpdateDiscButton();
++		if (!mActivatedFolder.empty() && VDFileIsPathEqual(path.c_str(), mActivatedFolder.c_str()))
++			FinishFolder(mCurrentIndex);
++		mActivatedFolder.clear();
++		return S_OK;
++	}
++	IFACEMETHODIMP OnSelectionChange(IFileDialog *dialog) override {
++		Attach(dialog);
++		ComPtr<IShellItem> item;
++		SFGAOF attributes = 0;
++		bool folder = SUCCEEDED(dialog->GetCurrentSelection(&item)) &&
++			SUCCEEDED(item->GetAttributes(SFGAO_FOLDER, &attributes)) && (attributes & SFGAO_FOLDER);
++		VDStringW path = VDShellPath(item.Get());
++		mSelectedFolder = folder ? path : VDStringW();
++		mSelectedIndex = VDDiscFolderIndex(mSelectedFolder);
++		mNameAtSelection = mSelectedIndex.empty() ? VDStringW() : TypedName();
++		UpdateDiscButton();
++		UpdateFile(folder ? VDStringW() : path);
++		return S_OK;
++	}
++	IFACEMETHODIMP OnTypeChange(IFileDialog *dialog) override {
++		UINT index;
++		if (SUCCEEDED(dialog->GetFileTypeIndex(&index)) && index && index <= mState.xlat.size() &&
++			index != mState.nFilterIndex) {
++			mState.nFilterIndex = index;
++			if (!mState.filename.empty()) mState.ChangeFilename();
++		}
++		return S_OK;
++	}
++	IFACEMETHODIMP OnFileOk(IFileDialog *dialog) override {
++		ComPtr<IShellItem> result;
++		if (FAILED(dialog->GetResult(&result))) return S_FALSE;
++		VDStringW path = VDShellPath(result.Get());
++		if (path.empty()) return S_FALSE;
++		DWORD attr = GetFileAttributesW(path.c_str());
++		if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
++			FinishFolder(VDDiscFolderIndex(path));
++			return S_FALSE;
++		}
++		if (path.size() >= MAX_PATH) {
++			MessageBoxW(mState.mhdlg, g_VDEmbeddedRussian ? L"Путь к файлу слишком длинный." :
++				L"The file path is too long.", g_szError, MB_OK | MB_ICONERROR);
++			return S_FALSE;
++		}
++		UpdateFile(path);
++		return mState.FileOk() ? S_OK : S_FALSE;
++	}
++	IFACEMETHODIMP OnShareViolation(IFileDialog *, IShellItem *, FDE_SHAREVIOLATION_RESPONSE *response) override {
++		*response = FDESVR_DEFAULT;
++		return S_OK;
++	}
++	IFACEMETHODIMP OnOverwrite(IFileDialog *, IShellItem *, FDE_OVERWRITE_RESPONSE *response) override {
++		*response = FDEOR_DEFAULT;
++		return S_OK;
++	}
++	IFACEMETHODIMP OnItemSelected(IFileDialogCustomize *, DWORD id, DWORD item) override {
++		if (id == IDC_DRIVER && item && item <= mState.detectList.size())
++			mState.ForceUseDriver(item - 1);
++		if (id == IDC_OPEN_SINGLE) {
++			mState.select_mode = item == IDC_OPEN_SINGLE ? 0 : item == IDC_OPEN_SEGMENTS ? 1 : 2;
++			mState.ChangeSelection();
++		}
++		return S_OK;
++	}
++	IFACEMETHODIMP OnButtonClicked(IFileDialogCustomize *, DWORD id) override {
++		if (id == kChooseFolderPlaylist)
++			FinishFolder(mSelectedIndex.empty() ? mCurrentIndex : mSelectedIndex);
++		if (id == IDC_DRIVER_OPTIONS) mState.ChangeOptions();
++		if (id == IDC_DRIVER_INFO) mState.ShowFileInfo();
++		return S_OK;
++	}
++	IFACEMETHODIMP OnCheckButtonToggled(IFileDialogCustomize *, DWORD, BOOL) override { return S_OK; }
++	IFACEMETHODIMP OnControlActivating(IFileDialogCustomize *, DWORD) override { return S_OK; }
++
++private:
++	VDOpenVideoDialogW32& mState;
++	IFileDialog *mDialog = nullptr;  // Lives until after Unadvise.
++	VDStringW mLastTyped;
++	VDStringW mCurrentIndex, mSelectedFolder, mSelectedIndex, mNameAtSelection, mActivatedFolder;
++};
++
++VDStringW VDOpenExplorerVideoDialog(VDOpenVideoDialogW32& state, int key, const wchar_t *title,
++	const wchar_t *filters, const wchar_t *initialFile) {
++	VDCheckPicker(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
++	struct ComScope { ~ComScope() { CoUninitialize(); } } com;
++	ComPtr<IFileOpenDialog> dialog;
++	VDCheckPicker(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)));
++	FILEOPENDIALOGOPTIONS flags;
++	VDCheckPicker(dialog->GetOptions(&flags));
++	VDCheckPicker(dialog->SetOptions(flags | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST | FOS_NOCHANGEDIR));
++	VDCheckPicker(dialog->SetTitle(title));
++
++	std::vector<COMDLG_FILTERSPEC> types;
++	while (*filters) {
++		const wchar_t *pattern = filters + wcslen(filters) + 1;
++		types.push_back({filters, pattern});
++		filters = pattern + wcslen(pattern) + 1;
++	}
++	VDCheckPicker(dialog->SetFileTypes((UINT)types.size(), types.data()));
++	if (!state.nFilterIndex) state.nFilterIndex = 1;
++	VDCheckPicker(dialog->SetFileTypeIndex(state.nFilterIndex));
++
++	VDStringW initial = initialFile ? VDStringW(initialFile) : VDGetLastLoadSavePath(key);
++	DWORD attr = initial.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(initial.c_str());
++	if (!initial.empty()) {
++		bool directory = attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
++		VDStringW parent = directory ? initial : VDFileSplitPathLeft(initial);
++		ComPtr<IShellItem> folder;
++		if (SUCCEEDED(SHCreateItemFromParsingName(parent.c_str(), nullptr, IID_PPV_ARGS(&folder))))
++			dialog->SetFolder(folder.Get());
++		if (!directory && attr != INVALID_FILE_ATTRIBUTES)
++			dialog->SetFileName(VDFileSplitPath(initial.c_str()));
++	}
++
++	ComPtr<IFileDialogCustomize> controls;
++	VDCheckPicker(dialog.As(&controls));
++	const bool ru = g_VDEmbeddedRussian;
++	VDCheckPicker(controls->AddPushButton(kChooseFolderPlaylist, ru ? L"Выбрать плейлист…" : L"Choose playlist..."));
++	VDCheckPicker(controls->SetControlState(kChooseFolderPlaylist, CDCS_INACTIVE));
++	VDCheckPicker(controls->StartVisualGroup(4911, ru ? L"Модуль ввода" : L"Input driver"));
++	VDCheckPicker(controls->AddComboBox(IDC_DRIVER));
++	VDCheckPicker(controls->AddPushButton(IDC_DRIVER_OPTIONS, ru ? L"Настройки…" : L"Options..."));
++	VDCheckPicker(controls->AddPushButton(IDC_DRIVER_INFO, ru ? L"Сведения…" : L"File information..."));
++	VDCheckPicker(controls->AddText(IDC_INFO_MSG, L""));
++	VDCheckPicker(controls->EndVisualGroup());
++	VDCheckPicker(controls->StartVisualGroup(4913, ru ? L"Что открыть" : L"Open as"));
++	VDCheckPicker(controls->AddRadioButtonList(IDC_OPEN_SINGLE));
++	VDCheckPicker(controls->AddControlItem(IDC_OPEN_SINGLE, IDC_OPEN_SINGLE, ru ? L"Один файл" : L"Single file"));
++	VDCheckPicker(controls->AddControlItem(IDC_OPEN_SINGLE, IDC_OPEN_SEGMENTS, ru ? L"Связанные сегменты" : L"Linked segments"));
++	VDCheckPicker(controls->AddControlItem(IDC_OPEN_SINGLE, IDC_OPEN_SEQUENCE, ru ? L"Последовательность" : L"Sequence"));
++	VDCheckPicker(controls->SetSelectedControlItem(IDC_OPEN_SINGLE, IDC_OPEN_SEGMENTS));
++	VDCheckPicker(controls->EndVisualGroup());
++
++	auto events = Microsoft::WRL::Make<VDExplorerVideoEvents>(state);
++	if (!events) VDCheckPicker(E_OUTOFMEMORY);
++	state.custom = controls.Get();
++	if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
++		events->UpdateFile(initial);
++	else {
++		state.EnableControl(IDC_DRIVER, false);
++		state.ChangeDriver();
++	}
++
++	DWORD cookie;
++	VDCheckPicker(dialog->Advise(events.Get(), &cookie));
++	HRESULT hr = dialog->Show(g_hWnd);
++	dialog->Unadvise(cookie);
++	events->Detach();
++	if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
++		if (events->ChosenDiscIndex.empty()) return VDStringW();
++	} else
++		VDCheckPicker(hr);
++	if (!events->ChosenDiscIndex.empty()) {
++		// Resolve the playlist while the current input and its playback position are intact.
++		using ChooseFolderPlaylist = int (__cdecl *)(HWND, const wchar_t *, wchar_t *, uint32);
++		auto choose = (ChooseFolderPlaylist)GetProcAddress(GetModuleHandleW(L"avlib-1.vdplugin"), "VDChooseFolderPlaylistW");
++		if (!choose)
++			throw MyError(g_VDEmbeddedRussian ? L"Не удалось загрузить модуль выбора плейлиста Blu-ray." :
++				L"Unable to load the Blu-ray playlist picker.");
++		wchar_t playlist[MAX_PATH] = {};
++		if (choose(g_hWnd, events->ChosenDiscIndex.c_str(), playlist, MAX_PATH) != 0)
++			return VDStringW();
++		state.filename = playlist;
++		// A disc selection always opens one MPLS using its detected decoder.
++		state.nFilterIndex = 1;
++		state.driver = nullptr;
++		state.driver_options.clear();
++		state.change_driver = false;
++		state.is_auto = true;
++		state.select_mode = 0;
++	}
++	VDSetLastLoadSaveFileName(key, state.filename.c_str());
++	return state.filename;
++}
++} // namespace
+diff --git a/src/VirtualDub/source/Init.cpp b/src/VirtualDub/source/Init.cpp
+index 660ba160c9d0a638ea289cff9f01ed7567f43d9b..686be753ab7c5c513ad02e093b9547096a60539c 100644
+--- a/src/VirtualDub/source/Init.cpp
++++ b/src/VirtualDub/source/Init.cpp
+@@ -481,8 +481,13 @@ static void VDRemoveVfwCodecs(const VDStringW& path)
+ 	}
+ }
+ 
++// The embedding owner reveals the frame only after assigning its child parent.
++bool g_VDStartEmbedded = false;
++bool g_VDEmbeddedRussian = false;
++
+ bool Init(HINSTANCE hInstance, int nCmdShow, VDCommandLine& cmdLine)
+ {
++	g_VDStartEmbedded = cmdLine.FindAndRemoveSwitch(L"syncsyncavembedded");
+ //#ifdef _DEBUG
+ 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF);
+ //#endif
+@@ -693,6 +698,8 @@ bool Init(HINSTANCE hInstance, int nCmdShow, VDCommandLine& cmdLine)
+ 	} else if (cmdLine.FindAndRemoveSwitch(L"max")) {
+ 		nCmdShow = SW_SHOWMAXIMIZED;
+ 	}
++	if (g_VDStartEmbedded)
++		nCmdShow = SW_HIDE;
+ 
+ 	if (!InitInstance(hInstance, nCmdShow, cmdLine.FindAndRemoveSwitch(L"topmost"))) {
+ 		return (FALSE);
+@@ -899,7 +906,8 @@ bool InitInstance( HANDLE hInstance, int nCmdShow, bool topmost) {
+ 	g_projectui->Attach((VDGUIHandle)g_hWnd);
+ 
+     // Make the window visible; update its client area; and return "success".
+-	pFrame->RestorePlacement(nCmdShow);
++	if (!g_VDStartEmbedded)
++		pFrame->RestorePlacement(nCmdShow);
+ 
+ 	if (nCmdShow != SW_HIDE && !(GetWindowLongW(g_hWnd, GWL_STYLE) & WS_VISIBLE)) {
+ 		ShowWindow(g_hWnd, nCmdShow);
+diff --git a/src/VirtualDub/source/Main.cpp b/src/VirtualDub/source/Main.cpp
+index ba943684bb4814b0db7ab816390b0f9a1a76a858..a32c4b388b4f77297ada171472b287fa574ef4cf 100644
+--- a/src/VirtualDub/source/Main.cpp
++++ b/src/VirtualDub/source/Main.cpp
+@@ -1,4 +1,4 @@
+-// VirtualDub - Video processing and capture application
++﻿// VirtualDub - Video processing and capture application
+ //
+ // Copyright (C) 1998-2004 Avery Lee
+ // Copyright (C) 2015-2020 Anton Shekhovtsov
+@@ -12,9 +12,12 @@
+ #include <commctrl.h>
+ #include <commdlg.h>
+ #include <dlgs.h>
++#include <shlobj.h>
++#include <wrl.h>
+ 
+ #include "resource.h"
+ #include "prefs.h"
++#include "EmbeddedTheme.h"
+ #include "oshelper.h"
+ #include "gui.h"
+ #include <vd2/system/cpuaccel.h>
+@@ -288,8 +291,13 @@ public:
+ 	void ForceUseDriver(int i);
+ 	bool FileOk();
+ 	void InitSelectMode();
++	void SetLabel(int id, const wchar_t *label);
++	void EnableControl(int id, bool enabled);
+ 
+-	HWND mhdlg;
++	IFileDialogCustomize *custom = nullptr;
++	DWORD driverItemCount = 0;
++
++	HWND mhdlg = nullptr;
+ 	MyError* init_error;
+ 	vdrefptr<IVDInputDriver> driver;
+ 	VDStringA driver_options;
+@@ -317,7 +325,11 @@ void VDOpenVideoDialogW32::ChangeFilename() {
+ 	detectList.clear();
+ 	format_id.clear();
+ 	int x = nFilterIndex ? xlat[nFilterIndex-1] : -1;
+-	if (append_mode) {
++	if (custom && filename.empty()) {
++		driver = nullptr;
++		is_auto = false;
++		is_detected = false;
++	} else if (append_mode) {
+ 		// just keep existing driver
+ 	} else if (x==-1) {
+ 		driver = 0;
+@@ -415,47 +427,62 @@ void VDOpenVideoDialogW32::ChangeFilename() {
+ 	if (opt_driver2!=opt_driver)
+ 		driver_options.clear();
+ 
+-	HWND w1 = GetDlgItem(mhdlg,IDC_DRIVER);
+-	SendMessageW(w1,CB_RESETCONTENT,0,0);
+-	if (driver) {
+-		int select = 0;
+-		if (detectList.empty())
+-			SendMessageW(w1,CB_ADDSTRING,0,(LPARAM)driver->GetSignatureName());
+-
+-		auto it(detectList.cbegin()), itEnd(detectList.cend());
+-		for(int i=0; it!=itEnd; ++it, i++) {
+-			IVDInputDriver *pDriver = *it;
+-			if (pDriver == driver) {
+-				select = i;
+-			}
+-			SendMessageW(w1,CB_ADDSTRING,0,(LPARAM)pDriver->GetSignatureName());
+-		}
+-
+-		SendMessageW(w1,CB_SETCURSEL,select,0);
+-	} else {
+-		auto it(detectList.cbegin()), itEnd(detectList.cend());
+-		for(int i=0; it!=itEnd; ++it, i++) {
+-			IVDInputDriver *pDriver = *it;
+-			SendMessageW(w1,CB_ADDSTRING,0,(LPARAM)pDriver->GetSignatureName());
+-		}
+-
+-		SendMessageW(w1,CB_SETCURSEL,-1,0);
+-	}
+-	EnableWindow(w1,detectList.size()>1);
++	int selected = -1;
++	HWND combo = custom ? nullptr : GetDlgItem(mhdlg, IDC_DRIVER);
++	if (custom) {
++		while (driverItemCount)
++			custom->RemoveControlItem(IDC_DRIVER, driverItemCount--);
++	} else
++		SendMessageW(combo, CB_RESETCONTENT, 0, 0);
++
++	auto addDriver = [&](IVDInputDriver *item, int index) {
++		if (item == driver) selected = index;
++		if (custom)
++			custom->AddControlItem(IDC_DRIVER, ++driverItemCount, item->GetSignatureName());
++		else
++			SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)item->GetSignatureName());
++	};
++	if (detectList.empty() && driver)
++		addDriver(driver, 0);
++	for (size_t i = 0; i < detectList.size(); ++i)
++		addDriver(detectList[i], (int)i);
++
++	if (custom) {
++		if (selected >= 0)
++			custom->SetSelectedControlItem(IDC_DRIVER, selected + 1);
++	} else
++		SendMessageW(combo, CB_SETCURSEL, selected, 0);
++	EnableControl(IDC_DRIVER, detectList.size() > 1);
+ 	ChangeDriver();
+ 	ChangeSelection();
+ }
+ 
++void VDOpenVideoDialogW32::SetLabel(int id, const wchar_t *label) {
++	if (!custom)
++		SetDlgItemTextW(mhdlg, id, label);
++	else if (id == IDC_OPEN_SEQUENCE)
++		custom->SetControlItemText(IDC_OPEN_SINGLE, IDC_OPEN_SEQUENCE, label);
++	else
++		custom->SetControlLabel(id, label);
++}
++
++void VDOpenVideoDialogW32::EnableControl(int id, bool enabled) {
++	if (custom)
++		custom->SetControlState(id, enabled ? CDCS_ENABLEDVISIBLE : CDCS_VISIBLE);
++	else
++		EnableWindow(GetDlgItem(mhdlg, id), enabled);
++}
++
+ void VDOpenVideoDialogW32::ChangeDriver() {
+ 	if (driver_options.empty())
+-		SetDlgItemTextW(mhdlg,IDC_DRIVER_OPTIONS,L"Options...");
++		SetLabel(IDC_DRIVER_OPTIONS,g_VDEmbeddedRussian ? L"Настройки…" : L"Options...");
+ 	else
+-		SetDlgItemTextW(mhdlg,IDC_DRIVER_OPTIONS,L"Options (+)");
++		SetLabel(IDC_DRIVER_OPTIONS,g_VDEmbeddedRussian ? L"Настройки (+)" : L"Options (+)");
+ 
+ 	bool extOpen = (driver && (driver->GetFlags() & IVDInputDriver::kF_SupportsOpts));
+-	EnableWindow(GetDlgItem(mhdlg,IDC_DRIVER_OPTIONS), extOpen && !filename.empty() && !append_mode);
+-	EnableWindow(GetDlgItem(mhdlg,IDC_DRIVER_INFO), driver && !filename.empty());
+-	SetDlgItemTextA(mhdlg,IDC_INFO_MSG,0);
++	EnableControl(IDC_DRIVER_OPTIONS, extOpen && !filename.empty() && !append_mode);
++	EnableControl(IDC_DRIVER_INFO, driver && !filename.empty());
++	SetLabel(IDC_INFO_MSG, L"");
+ 
+ 	if (driver && !filename.empty()) try {
+ 		VDXMediaInfo info;
+@@ -463,7 +490,7 @@ void VDOpenVideoDialogW32::ChangeDriver() {
+ 		IVDInputDriver::DetectionConfidence result = VDTestInputDriverForFile(info,filename.c_str(),driver);
+ 		this->info = info;
+ 		if (result==IVDInputDriver::kDC_None)
+-			SetDlgItemTextA(mhdlg,IDC_INFO_MSG,"Not detected");
++			SetLabel(IDC_INFO_MSG,g_VDEmbeddedRussian ? L"Не определено" : L"Not detected");
+ 		else
+ 			ChangeInfo();
+ 	} catch (const MyError&) {
+@@ -491,7 +518,7 @@ void VDOpenVideoDialogW32::ChangeInfo() {
+ 			msg += VDTextAToW(VDPixmapFormatPrintSpec(info.pixmapFormat));
+ 		}
+ 	}
+-	SetDlgItemTextW(mhdlg,IDC_INFO_MSG,msg.c_str());
++	SetLabel(IDC_INFO_MSG,msg.c_str());
+ }
+ 
+ void VDOpenVideoDialogW32::ForceUseDriver(int i) {
+@@ -522,7 +549,7 @@ void VDOpenVideoDialogW32::ChangeOptions() {
+ 	if (opt) {
+ 		SetOptions(opt);
+ 		delete opt;
+-		SetDlgItemTextW(mhdlg,IDC_DRIVER_OPTIONS,L"Options (+)");
++		SetLabel(IDC_DRIVER_OPTIONS,g_VDEmbeddedRussian ? L"Настройки (+)" : L"Options (+)");
+ 	}
+ }
+ 
+@@ -582,7 +609,7 @@ void VDOpenVideoDialogW32::ShowFileInfo() {
+ 		if(vs) vs->Release();
+ 		if(as) as->Release();
+ 	} catch (const MyError& e){
+-		SetDlgItemTextW(mhdlg, IDC_INFO_MSG, e.gets());
++		SetLabel(IDC_INFO_MSG, e.gets());
+ 	}
+ }
+ 
+@@ -593,20 +620,32 @@ void VDOpenVideoDialogW32::InitSelectMode() {
+ }
+ 
+ void VDOpenVideoDialogW32::ChangeSelection() {
+-	VDStringW msg(L"Sequence");
++	VDStringW msg(g_VDEmbeddedRussian ? L"Последовательность" : L"Sequence");
+ 	if (select_mode==2 && !filename.empty()) {
+ 		int count = AppendAVIAutoscanEnum(filename.c_str());
+-		if (count%10==1)
++		if (g_VDEmbeddedRussian)
++			msg.append_sprintf(L" — файлов: %d", count);
++		else if (count%10==1)
+ 			msg.append_sprintf(L": %d file", count);
+ 		else
+ 			msg.append_sprintf(L": %d files", count);
+ 	}
+-	SetDlgItemTextW(mhdlg,IDC_OPEN_SEQUENCE, msg.c_str());
++	SetLabel(IDC_OPEN_SEQUENCE, msg.c_str());
+ }
+ 
+ INT_PTR VDOpenVideoDialogW32::DlgProc(UINT message, WPARAM wParam, LPARAM lParam) {
+ 	switch(message) {
+ 	case WM_INITDIALOG:
++		if (g_VDEmbeddedRussian) {
++			SetDlgItemTextW(mhdlg,4911,L"Модуль ввода");
++			SetDlgItemTextW(mhdlg,4912,L"Модуль:");
++			SetDlgItemTextW(mhdlg,4913,L"Что открыть");
++			SetDlgItemTextW(mhdlg,IDC_DRIVER_OPTIONS,L"Настройки…");
++			SetDlgItemTextW(mhdlg,IDC_DRIVER_INFO,L"Сведения…");
++			SetDlgItemTextW(mhdlg,IDC_OPEN_SINGLE,L"Один файл");
++			SetDlgItemTextW(mhdlg,IDC_OPEN_SEGMENTS,L"Связанные сегменты");
++			SetDlgItemTextW(mhdlg,IDC_OPEN_SEQUENCE,L"Последовательность");
++		}
+ 		EnableWindow(GetDlgItem(mhdlg,IDC_DRIVER_OPTIONS),false);
+ 		EnableWindow(GetDlgItem(mhdlg,IDC_DRIVER_INFO),false);
+ 		EnableWindow(GetDlgItem(mhdlg,IDC_OPEN_SEGMENTS),!append_mode && !audio_mode);
+@@ -730,6 +769,8 @@ UINT_PTR CALLBACK OpenVideoProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
+ 	return FALSE;
+ }
+ 
++#include "ExplorerVideoDialog.inl"
++
+ VDStringW g_OpenVideoFilter;
+ VDStringW g_OpenAudioFilter;
+ 
+@@ -779,7 +820,7 @@ void OpenInput(bool append, bool audio, const wchar_t* filename, MyError* err) {
+ 		dlg.nFilterIndex = filter_list.size();
+ 	}
+ 
+-	const wchar_t* title = L"Open video file";
++	const wchar_t* title = g_VDEmbeddedRussian ? L"Открыть видео" : L"Open video file";
+ 	int fskey = VDFSPECKEY_LOADVIDEOFILE;
+ 
+ 	VDRegistryAppKey key(g_szRegKeyPersistence);
+@@ -802,7 +843,11 @@ void OpenInput(bool append, bool audio, const wchar_t* filename, MyError* err) {
+ 
+ 	int optvals[]={ dlg.nFilterIndex };
+ 
+-	VDStringW fname(VDGetLoadFileName(fskey, (VDGUIHandle)g_hWnd, title, fileFilters.c_str(), NULL, opts, optvals, &fn));
++	VDStringW fname;
++	if (g_VDStartEmbedded && !audio && !append)
++		fname = VDOpenExplorerVideoDialog(dlg, fskey, title, fileFilters.c_str(), fn.lpstrFile);
++	else
++		fname = VDGetLoadFileName(fskey, (VDGUIHandle)g_hWnd, title, fileFilters.c_str(), NULL, opts, optvals, &fn);
+ 
+ 	if (fname.empty())
+ 		return;
+diff --git a/src/VirtualDub/source/PositionControl.cpp b/src/VirtualDub/source/PositionControl.cpp
+index 7ed0f0aad1c489ae80714db5949eaa65da7beac8..d475386f16c94d1c4d9406299bce9d5bfbef43ac 100644
+--- a/src/VirtualDub/source/PositionControl.cpp
++++ b/src/VirtualDub/source/PositionControl.cpp
+@@ -1,4 +1,4 @@
+-// VirtualDub - Video processing and capture application
++﻿// VirtualDub - Video processing and capture application
+ //
+ // Copyright (C) 1998-2001 Avery Lee
+ // Copyright (C) 2016-2020 Anton Shekhovtsov
+@@ -8,6 +8,8 @@
+ //
+ 
+ #include "stdafx.h"
++#include "EmbeddedTheme.h"
++#include "EmbeddedTransportIcons.h"
+ 
+ #define f_POSITIONCONTROL_CPP
+ 
+@@ -91,33 +93,75 @@ enum {
+ 	IDC_FILTER_MARKOUT	= 516,
+ };
+ 
++// Keep native input, capture, checkbox, tooltip and accessibility behavior;
++// replace only the pixels of embedded transport buttons.
++static LRESULT CALLBACK VDDarkTransport(HWND wnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
++    using namespace VDEmbeddedTheme;
++    if(msg==WM_NCDESTROY){RemoveWindowSubclass(wnd,VDDarkTransport,id);return DefSubclassProc(wnd,msg,wp,lp);}
++    if(msg==WM_ERASEBKGND)return 1;
++    if(msg==WM_PAINT){
++        PAINTSTRUCT ps;HDC dc=BeginPaint(wnd,&ps);RECT rc;GetClientRect(wnd,&rc);
++        FillRect(dc,&rc,PanelBrush());RECT box=rc;InflateRect(&box,-1,-2);
++        POINT mouse;GetCursorPos(&mouse);ScreenToClient(wnd,&mouse);
++        bool hot=PtInRect(&rc,mouse)!=0,enabled=IsWindowEnabled(wnd)!=0;
++        LRESULT state=SendMessageW(wnd,BM_GETSTATE,0,0);
++        bool pressed=(state&BST_PUSHED)||SendMessageW(wnd,BM_GETCHECK,0,0)==BST_CHECKED;
++        COLORREF fill=pressed?RGB(47,53,60):hot&&enabled?RGB(47,53,60):RGB(28,32,36);
++        HBRUSH bg=CreateSolidBrush(fill);FillRect(dc,&box,bg);DeleteObject(bg);
++        if(hot||pressed||GetFocus()==wnd)FrameRect(dc,&box,GetFocus()==wnd?AccentBrush():BorderBrush());
++        COLORREF ink=!enabled?RGB(75,83,92):(hot||pressed)?Ink:RGB(168,176,184);
++        TransportIcon(dc,rc,GetDlgCtrlID(wnd)-IDC_STOP,ink);
++        EndPaint(wnd,&ps);return 0;
++    }
++    if(msg==WM_MOUSEMOVE){TRACKMOUSEEVENT track={sizeof(track),TME_LEAVE,wnd,0};TrackMouseEvent(&track);}
++    LRESULT result=DefSubclassProc(wnd,msg,wp,lp);
++    if(msg==WM_MOUSEMOVE||msg==WM_MOUSELEAVE||msg==WM_SETFOCUS||msg==WM_KILLFOCUS||msg==BM_SETSTATE||msg==BM_SETCHECK||msg==WM_ENABLE)InvalidateRect(wnd,NULL,FALSE);
++    return result;
++}
++
++
++
++
++static LRESULT CALLBACK VDDarkFrameLabel(HWND wnd,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
++    if(msg==WM_NCDESTROY)RemoveWindowSubclass(wnd,VDDarkFrameLabel,id);
++    if(msg==WM_ERASEBKGND)return 1;
++    if(msg==WM_PAINT){
++        PAINTSTRUCT ps;HDC dc=BeginPaint(wnd,&ps);RECT r;GetClientRect(wnd,&r);FillRect(dc,&r,VDEmbeddedTheme::PanelBrush());
++        std::vector<wchar_t> text(GetWindowTextLengthW(wnd)+1);GetWindowTextW(wnd,text.data(),(int)text.size());
++        HGDIOBJ font=SelectObject(dc,VDEmbeddedTheme::Font(wnd));SetBkMode(dc,TRANSPARENT);SetTextColor(dc,VDEmbeddedTheme::Muted);
++        DrawTextW(dc,text.data(),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);SelectObject(dc,font);EndPaint(wnd,&ps);return 0;
++    }
++    return DefSubclassProc(wnd,msg,wp,lp);
++}
++
+ static const struct {
+ 	UINT id;
+ 	const wchar_t *tip;
++	const wchar_t *russianTip;
+ } g_posctltips[]={
+-	{ IDC_TRACKBAR,			L"[Trackbar]\r\n\r\nDrag this to seek to any frame in the movie. Hold down SHIFT to snap to keyframes/I-frames." },
++	{ IDC_TRACKBAR,			L"[Trackbar]\r\n\r\nDrag this to seek to any frame in the movie. Hold down SHIFT to snap to keyframes/I-frames.", L"Перетащите ползунок для перехода к кадру. Shift — по ключевым кадрам." },
+ 	{ IDC_FRAME,			L"[Frame indicator]\r\n\r\nDisplays the current frame number, timestamp, and frame type.\r\n\r\n"
+ 							L"[ ] AVI delta frame\r\n"
+ 							L"[D] AVI dropped frame\r\n"
+ 							L"[K] AVI key frame\r\n"
+ 							L"[I] MPEG-1 intra frame\r\n"
+ 							L"[P] MPEG-1 forward predicted frame\r\n"
+-							L"[B] MPEG-1 bidirectionally predicted frame" },
+-	{ IDC_STOP,				L"[Stop] Stops playback or the current dub operation." },
+-	{ IDC_PLAY,				L"[Input playback] Starts playback of the input file." },
+-	{ IDC_PLAYPREVIEW,		L"[Output playback] Starts preview of processed output." },
+-	{ IDC_START,			L"[Start] Move to the first frame." },
+-	{ IDC_BACKWARD,			L"[Backward] Back up by one frame." },
+-	{ IDC_FORWARD,			L"[Forward] Advance by one frame." },
+-	{ IDC_END,				L"[End] Move to the last frame." },
+-	{ IDC_KEYPREV,			L"[Key previous] Move to the previous key frame or I-frame." },
+-	{ IDC_KEYNEXT,			L"[Key next] Move to the next key frame or I-frame." },
+-	{ IDC_SCENEREV,			L"[Scene reverse] Scan backward for the last scene change." },
+-	{ IDC_SCENEFWD,			L"[Scene forward] Scan forward for the next scene change." },
+-	{ IDC_MARKIN,			L"[Mark in] Specify the start for processing or of a selection to delete." },
+-	{ IDC_MARKOUT,			L"[Mark out] Specify the end for processing or of a selection to delete." },
+-	{ IDC_FILTER_MARKIN,	L"[Mark in] Specify the start for filter range." },
+-	{ IDC_FILTER_MARKOUT,	L"[Mark out] Specify the end for filter range." },
++							L"[B] MPEG-1 bidirectionally predicted frame", L"Номер кадра, время и тип кадра." },
++	{ IDC_STOP,				L"[Stop] Stops playback or the current dub operation.", L"Остановить воспроизведение." },
++	{ IDC_PLAY,				L"[Input playback] Starts playback of the input file.", L"Воспроизвести исходное видео." },
++	{ IDC_PLAYPREVIEW,		L"[Output playback] Starts preview of processed output.", L"Предпросмотр результата." },
++	{ IDC_START,			L"[Start] Move to the first frame.", L"Перейти к первому кадру." },
++	{ IDC_BACKWARD,			L"[Backward] Back up by one frame.", L"На один кадр назад." },
++	{ IDC_FORWARD,			L"[Forward] Advance by one frame.", L"На один кадр вперёд." },
++	{ IDC_END,				L"[End] Move to the last frame.", L"В конец видео." },
++	{ IDC_KEYPREV,			L"[Key previous] Move to the previous key frame or I-frame.", L"К предыдущему ключевому кадру." },
++	{ IDC_KEYNEXT,			L"[Key next] Move to the next key frame or I-frame.", L"К следующему ключевому кадру." },
++	{ IDC_SCENEREV,			L"[Scene reverse] Scan backward for the last scene change.", L"Найти предыдущую смену сцены." },
++	{ IDC_SCENEFWD,			L"[Scene forward] Scan forward for the next scene change.", L"Найти следующую смену сцены." },
++	{ IDC_MARKIN,			L"[Mark in] Specify the start for processing or of a selection to delete.", L"Начало выделения." },
++	{ IDC_MARKOUT,			L"[Mark out] Specify the end for processing or of a selection to delete.", L"Конец выделения." },
++	{ IDC_FILTER_MARKIN,	L"[Mark in] Specify the start for filter range.", L"Начало диапазона фильтра." },
++	{ IDC_FILTER_MARKOUT,	L"[Mark out] Specify the end for filter range.", L"Конец диапазона фильтра." },
+ };
+ 
+ HBITMAP LoadImageStretch(LPCWSTR id, int w, int h)
+@@ -295,7 +339,7 @@ ATOM VDPositionControlW32::Register() {
+ 	wc.hInstance	= g_hInst;
+ 	wc.hIcon		= NULL;
+ 	wc.hCursor		= LoadCursorW(NULL, IDC_ARROW);
+-	wc.hbrBackground= (HBRUSH)(COLOR_3DFACE+1);	//GetStockObject(LTGRAY_BRUSH);
++	wc.hbrBackground= (g_VDStartEmbedded ? VDEmbeddedTheme::PanelBrush() : (HBRUSH)(COLOR_3DFACE+1));	//GetStockObject(LTGRAY_BRUSH);
+ 	wc.lpszMenuName	= NULL;
+ 	wc.lpszClassName= POSITIONCONTROLCLASS;
+ 
+@@ -347,9 +391,9 @@ VDPositionControlW32::VDPositionControlW32(HWND hwnd)
+ 	, mbZoom(false)
+ {
+ 	mBrushes[kBrushCurrentFrame] = CreateSolidBrush(RGB(255,0,0));
+-	mBrushes[kBrushTick] = CreateSolidBrush(RGB(0,0,0));
+-	mBrushes[kBrushTrack] = CreateSolidBrush(RGB(128,128,128));
+-	mBrushes[kBrushSelection] = CreateSolidBrush(RGB(192,224,255));
++	mBrushes[kBrushTick] = CreateSolidBrush(g_VDStartEmbedded?VDEmbeddedTheme::Muted:RGB(0,0,0));
++	mBrushes[kBrushTrack] = CreateSolidBrush(g_VDStartEmbedded?RGB(52,58,65):RGB(128,128,128));
++	mBrushes[kBrushSelection] = CreateSolidBrush(g_VDStartEmbedded?RGB(75,83,92):RGB(192,224,255));
+ 	mBrushes[kBrushSelection2] = CreateSolidBrush(RGB(247,148,29));
+ 
+ 	SetRect(&mThumbRect, 0, 0, 0, 0);
+@@ -602,7 +646,7 @@ VDEvent<IVDPositionControl, VDPositionControlEventData>& VDPositionControlW32::P
+ BOOL CALLBACK VDPositionControlW32::InitChildrenProc(HWND hWnd, LPARAM lParam) {
+ 	VDPositionControlW32 *pThis = (VDPositionControlW32 *)lParam;
+ 	UINT id;
+-	int fill = GetSysColor(COLOR_BTNFACE);
++	int fill = g_VDStartEmbedded?VDEmbeddedTheme::Panel:GetSysColor(COLOR_BTNFACE);
+ 	int fill_r = fill & 0xFF;
+ 	int fill_g = (fill & 0xFF00) >> 8;
+ 	int fill_b = (fill & 0xFF0000) >> 16;
+@@ -625,6 +669,7 @@ BOOL CALLBACK VDPositionControlW32::InitChildrenProc(HWND hWnd, LPARAM lParam) {
+ 	case IDC_FILTER_MARKIN:
+ 	case IDC_FILTER_MARKOUT:
+ 		{
++			if(g_VDStartEmbedded)SetWindowSubclass(hWnd,VDDarkTransport,1,0);
+ 			int i = id - IDC_STOP;
+ 			void* icon = pThis->shIcon1[i];
+ 			void* icon_dark = pThis->shIcon2[i];
+@@ -634,7 +679,8 @@ BOOL CALLBACK VDPositionControlW32::InitChildrenProc(HWND hWnd, LPARAM lParam) {
+ 		break;
+ 
+ 	case IDC_FRAME:
+-		SendMessageW(hWnd, WM_SETFONT, (WPARAM)pThis->mFrameFont, (LPARAM)MAKELONG(FALSE, 0));
++        if(g_VDStartEmbedded)SetWindowSubclass(hWnd,VDDarkFrameLabel,1,0);
++		SendMessageW(hWnd, WM_SETFONT, (WPARAM)(g_VDStartEmbedded?VDEmbeddedTheme::Font(hWnd):pThis->mFrameFont), (LPARAM)MAKELONG(FALSE, 0));
+ 		break;
+ 
+ 	}
+@@ -666,6 +712,11 @@ LRESULT APIENTRY VDPositionControlW32::StaticWndProc(HWND hwnd, UINT msg, WPARAM
+ }
+ 
+ LRESULT CALLBACK VDPositionControlW32::WndProc(UINT msg, WPARAM wParam, LPARAM lParam) {
++    if(g_VDStartEmbedded){
++        if(msg==WM_MOUSELEAVE)InvalidateRect(mhwnd,&mThumbRect,FALSE);
++        if(msg==WM_ERASEBKGND){RECT r;GetClientRect(mhwnd,&r);FillRect((HDC)wParam,&r,VDEmbeddedTheme::PanelBrush());return 1;}
++        if(msg==WM_CTLCOLORSTATIC){SetTextColor((HDC)wParam,VDEmbeddedTheme::Muted);SetBkColor((HDC)wParam,VDEmbeddedTheme::Panel);return (LRESULT)VDEmbeddedTheme::PanelBrush();}
++    }
+ 	switch(msg) {
+ 	case WM_CREATE:
+ 		OnCreate();
+@@ -694,7 +745,7 @@ LRESULT CALLBACK VDPositionControlW32::WndProc(UINT msg, WPARAM wParam, LPARAM l
+ 
+ 			for(const auto& posctltip : g_posctltips) {
+ 				if (id == posctltip.id) {
+-					lphdr->lpszText = const_cast<wchar_t*>(posctltip.tip);
++					lphdr->lpszText = const_cast<wchar_t*>(g_VDEmbeddedRussian ? posctltip.russianTip : posctltip.tip);
+ 					break;
+ 				}
+ 			}
+@@ -909,6 +960,7 @@ LRESULT CALLBACK VDPositionControlW32::WndProc(UINT msg, WPARAM wParam, LPARAM l
+ 		break;
+ 
+ 	case WM_MOUSEMOVE:
++        if(g_VDStartEmbedded){TRACKMOUSEEVENT track={sizeof(track),TME_LEAVE,mhwnd,0};TrackMouseEvent(&track);InvalidateRect(mhwnd,&mThumbRect,FALSE);}
+ 		if (mDragMode == kDragThumbFast) {
+ 			POINT pt = {(SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam)};
+ 
+@@ -1022,6 +1074,7 @@ void VDPositionControlW32::OnCreate() {
+ 	mbHasNavControls		= !(dwStyles & PCS_XNAV);
+ 	mbHasPosText			= !(dwStyles & PCS_XNAV);
+ 	mbHasFilterControls		= !!(dwStyles & PCS_FILTER);
++    if(g_VDStartEmbedded){mbHasMarkControls=false;mbHasFilterControls=false;}
+ 
+ 	// We use 24px at 96 dpi.
+ 	int ht = MulDiv(24, mButtonScale, 100);
+@@ -1116,7 +1169,7 @@ void VDPositionControlW32::OnCreate() {
+ 	if (mTickWidth<1) mTickWidth = 1;
+ 
+ 	if (mbHasPosText) {
+-		CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, ht, mhwnd, (HMENU)IDC_FRAME, g_hInst, NULL);
++		CreateWindowExW(g_VDStartEmbedded?0:WS_EX_STATICEDGE, L"STATIC", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, ht, mhwnd, (HMENU)IDC_FRAME, g_hInst, NULL);
+ 		mhmenuPopup = LoadMenuW(g_hInst, MAKEINTRESOURCEW(IDR_POSITION_MENU));
+ 	}
+ 
+@@ -1158,7 +1211,7 @@ void VDPositionControlW32::OnCreate() {
+ 	if (mbHasPlaybackControls) {
+ 		CreateWindowExW(0   ,L"BUTTON"  ,NULL,WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | buttonStyle                   ,0,0,ht,ht,mhwnd, (HMENU)IDC_STOP           , g_hInst, NULL);
+ 		CreateWindowExW(0   ,L"BUTTON"  ,NULL,WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | buttonStyle                   ,0,0,ht,ht,mhwnd, (HMENU)IDC_PLAY           , g_hInst, NULL);
+-		CreateWindowExW(0   ,L"BUTTON"  ,NULL,WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | buttonStyle                   ,0,0,ht,ht,mhwnd, (HMENU)IDC_PLAYPREVIEW    , g_hInst, NULL);
++		if(!g_VDStartEmbedded)CreateWindowExW(0   ,L"BUTTON"  ,NULL,WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | buttonStyle                   ,0,0,ht,ht,mhwnd, (HMENU)IDC_PLAYPREVIEW    , g_hInst, NULL);
+ 	}
+ 	if (mbHasNavControls) {
+ 		CreateWindowExW(0   ,L"BUTTON"  ,NULL,WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | buttonStyle                   ,0,0,ht,ht,mhwnd, (HMENU)IDC_START          , g_hInst, NULL);
+@@ -1232,9 +1285,9 @@ void VDPositionControlW32::UpdateString(VDPosition pos) {
+ 			sec	= ticks %  60; ticks /=  60;
+ 			min	= ticks %  60; ticks /=  60;
+ 
+-			success = (unsigned)swprintf(buf, std::size(buf), L" Frame %I64d (%d:%02d:%02d.%03d)", (sint64)pos, ticks, min, sec, ms) < std::size(buf);
++			success = (unsigned)swprintf(buf, std::size(buf), g_VDEmbeddedRussian ? L" Кадр %I64d (%d:%02d:%02d.%03d)" : L" Frame %I64d (%d:%02d:%02d.%03d)", (sint64)pos, ticks, min, sec, ms) < std::size(buf);
+ 		} else
+-			success = (unsigned)swprintf(buf, std::size(buf), L" Frame %I64d", (sint64)pos) < std::size(buf);
++			success = (unsigned)swprintf(buf, std::size(buf), g_VDEmbeddedRussian ? L" Кадр %I64d" : L" Frame %I64d", (sint64)pos) < std::size(buf);
+ 	}
+ 
+ 	if (success) {
+@@ -1272,6 +1325,7 @@ void VDPositionControlW32::OnSize() {
+ 
+ 	if (mbHasPlaybackControls) {
+ 		for(id = IDC_STOP; id < IDC_START; id++) {
++            if(!GetDlgItem(mhwnd,id))continue;
+ 			SetWindowPos(GetDlgItem(mhwnd, id), NULL, x, y, 0, 0, SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOZORDER);
+ 
+ 			x += mButtonSize;
+@@ -1309,7 +1363,8 @@ void VDPositionControlW32::OnSize() {
+ 	}
+ 
+ 	if (mbHasPosText) {
+-		int width = std::min<int>(wndr.right - x, nFrameCtlWidth);
++		int width = std::max<int>(0,std::min<int>(wndr.right - x, nFrameCtlWidth));
++        if(g_VDStartEmbedded){SetWindowPos(GetDlgItem(mhwnd,IDC_FRAME),NULL,x,y,width,mButtonSize,SWP_NOACTIVATE|SWP_NOZORDER);return;}
+ 		SetWindowPos(GetDlgItem(mhwnd, IDC_FRAME), NULL, x, y+((mButtonSize - nFrameCtlHeight)>>1), width, nFrameCtlHeight, SWP_NOACTIVATE|SWP_NOZORDER);
+ 	}
+ }
+@@ -1323,7 +1378,7 @@ void VDPositionControlW32::OnPaint() {
+ 
+ 	HGDIOBJ hOldFont = SelectObject(hdc, mFrameNumberFont);
+ 	SetBkMode(hdc, TRANSPARENT);
+-	SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
++	SetTextColor(hdc, g_VDStartEmbedded?VDEmbeddedTheme::Muted:GetSysColor(COLOR_WINDOWTEXT));
+ 	SetTextAlign(hdc, TA_TOP | TA_CENTER);
+ 
+ 	char buf[64];
+@@ -1535,7 +1590,7 @@ void VDPositionControlW32::OnPaint() {
+ 	RECT rEdge = mTrack;
+ 	InflateRect(&rEdge, xedge, yedge);
+ 
+-	DrawEdge(hdc, &rEdge, EDGE_SUNKEN, BF_RECT);
++	if(g_VDStartEmbedded)FrameRect(hdc,&rEdge,VDEmbeddedTheme::BorderBrush());else DrawEdge(hdc, &rEdge, EDGE_SUNKEN, BF_RECT);
+ 
+ 	if (mbZoom) {
+ 		RECT r1 = {0, mTrack.top, mTrack.left-10, mTrack.bottom};
+@@ -1544,15 +1599,15 @@ void VDPositionControlW32::OnPaint() {
+ 		FillRect(hdc, &r2, mBrushes[kBrushTrack]);
+ 		InflateRect(&r1, xedge, yedge);
+ 		InflateRect(&r2, xedge, yedge);
+-		DrawEdge(hdc, &r1, EDGE_SUNKEN, BF_RECT);
+-		DrawEdge(hdc, &r2, EDGE_SUNKEN, BF_RECT);
++		if(g_VDStartEmbedded){FrameRect(hdc,&r1,VDEmbeddedTheme::BorderBrush());FrameRect(hdc,&r2,VDEmbeddedTheme::BorderBrush());}
++        else {DrawEdge(hdc, &r1, EDGE_SUNKEN, BF_RECT);DrawEdge(hdc, &r2, EDGE_SUNKEN, BF_RECT);}
+ 	}
+ 
+ 	// Draw cursor.
+ 	RECT rThumb = mThumbRect;
+ 
+-	DrawEdge(hdc, &rThumb, EDGE_RAISED, BF_SOFT|BF_RECT|BF_ADJUST);
+-	DrawEdge(hdc, &rThumb, EDGE_SUNKEN, BF_SOFT|BF_RECT|BF_ADJUST);
++	if(g_VDStartEmbedded){POINT cursor;GetCursorPos(&cursor);ScreenToClient(mhwnd,&cursor);SetDCBrushColor(hdc,mDragMode!=kDragNone||PtInRect(&mThumbRect,cursor)?VDEmbeddedTheme::Ink:RGB(168,176,184));FillRect(hdc,&rThumb,(HBRUSH)GetStockObject(DC_BRUSH));}
++    else {DrawEdge(hdc, &rThumb, EDGE_RAISED, BF_SOFT|BF_RECT|BF_ADJUST);DrawEdge(hdc, &rThumb, EDGE_SUNKEN, BF_SOFT|BF_RECT|BF_ADJUST);}
+ 
+ 	// All done.
+ 	SelectObject(hdc, hOldPen);
+diff --git a/src/VirtualDub/source/VideoWindow.cpp b/src/VirtualDub/source/VideoWindow.cpp
+index 70adf8945e0c8005b964600baa65751302fb096b..54a617c250003c56d8cefc26aca1082c62cb5959 100644
+--- a/src/VirtualDub/source/VideoWindow.cpp
++++ b/src/VirtualDub/source/VideoWindow.cpp
+@@ -8,6 +8,7 @@
+ //
+ 
+ #include "stdafx.h"
++#include "EmbeddedTheme.h"
+ 
+ #include <vd2/system/fraction.h>
+ #include <vd2/system/vdtypes.h>
+@@ -198,7 +199,7 @@ ATOM VDVideoWindow::RegisterControl() {
+ 	wc.hInstance		= g_hInst;
+ 	wc.hIcon			= NULL;
+ 	wc.hCursor			= LoadCursorW(NULL, IDC_ARROW);
+-	wc.hbrBackground	= (HBRUSH)(COLOR_3DFACE+1);
++	wc.hbrBackground	= (g_VDStartEmbedded ? VDEmbeddedTheme::CanvasBrush() : (HBRUSH)(COLOR_3DFACE+1));
+ 	wc.lpszMenuName		= NULL;
+ 	wc.lpszClassName	= g_szVideoWindowClass;
+ 
+@@ -616,6 +617,7 @@ LRESULT VDVideoWindow::WndProc(UINT msg, WPARAM wParam, LPARAM lParam) {
+ 		NCPaint((HRGN)wParam);
+ 		return 0;
+ 	case WM_ERASEBKGND:
++        if(g_VDStartEmbedded){RECT r;GetClientRect(mhwnd,&r);FillRect((HDC)wParam,&r,VDEmbeddedTheme::CanvasBrush());return 1;}
+ 		if (mbBorderless) return true;
+ 		break;
+ 	case WM_PAINT:
+@@ -854,6 +856,11 @@ void VDVideoWindow::NCPaint(HRGN hrgn) {
+ 		}
+ 
+ 		OffsetRect(&rc, -rc.left, -rc.top);
++        if(g_VDStartEmbedded){
++            ExcludeClipRect(hdc,mBorder,mBorder,rc.right-mBorder,rc.bottom-mBorder);
++            FillRect(hdc,&rc,VDEmbeddedTheme::CanvasBrush());ReleaseDC(mhwnd,hdc);return;
++        }
++
+ 
+ 		if (mBorder>4) {
+ 			RECT r1=rc;
+diff --git a/src/VirtualDub/source/project.cpp b/src/VirtualDub/source/project.cpp
+index df2f944cb772aded7663afe3b355aa9f79223c57..4034479cac546f30b12818f0dcc1e28ddc6c7666 100644
+--- a/src/VirtualDub/source/project.cpp
++++ b/src/VirtualDub/source/project.cpp
+@@ -1633,10 +1633,9 @@ void VDProject::Open(const wchar_t *pFilename, IVDInputDriver *pSelectedDriver,
+ 	VDToolsHandleFileOpen(g_szInputAVIFile, pSelectedDriver);
+ }
+ 
+-void VDProject::InnerReopen() {
+-	// attempt to determine input file type
+-
+-	VDStringW filename(VDGetFullPath(g_szInputAVIFile));
++void VDProject::InnerReopen(const wchar_t* playlistSource, const char* playlistOptions, uint32 playlistOptionsLen) {
++	// Stage a new input while the current one is still usable.
++	VDStringW filename(VDGetFullPath(playlistSource ? playlistSource : g_szInputAVIFile));
+ 	VDStringA options;
+ 
+ 	IVDInputDriver *pSelectedDriver;
+@@ -1646,7 +1645,7 @@ void VDProject::InnerReopen() {
+ 		pSelectedDriver = VDGetInputDriverByName(mInputDriverName.c_str());
+ 		if (!pSelectedDriver)
+ 			throw MyError(L"The input driver \"%s\" is no more available.", mInputDriverName.c_str());
+-		if (g_pInputOpts) {
++		if (!playlistSource && g_pInputOpts) {
+ 			int len = g_pInputOpts->write(0,0);
+ 			options.resize(len);
+ 			g_pInputOpts->write(&options[0],len);
+@@ -1665,8 +1664,12 @@ void VDProject::InnerReopen() {
+ 
+ 	// Extended open?
+ 
+-	InputFileOptions* newOptions = 0;
+-	if (!options.empty()) {
++	vdautoptr<InputFileOptions> newOptions;
++	if (playlistOptionsLen) {
++		newOptions = newInput->createOptions(playlistOptions, playlistOptionsLen);
++		if (!newOptions) throw MyError("Invalid playlist options.");
++		newInput->setOptions(newOptions);
++	} else if (!options.empty()) {
+ 		newOptions = newInput->createOptions(options.c_str(),options.length());
+ 		newInput->setOptions(newOptions);
+ 	}
+@@ -1676,8 +1679,7 @@ void VDProject::InnerReopen() {
+ 	newInput->Init(filename.c_str());
+ 
+ 	vdrefptr<IVDVideoSource> pVS;
+-	vdrefptr<AudioSource> pAS;
+-	newInput->GetVideoSource(0, ~pVS);
++	if (!newInput->GetVideoSource(0, ~pVS) || !pVS) throw MyError("No video stream in the new input.");
+ 
+ 	VDRenderSetVideoSourceInputFormat(pVS, g_dubOpts.video.mInputFormat);
+ 
+@@ -1692,7 +1694,7 @@ void VDProject::InnerReopen() {
+ 
+ 	FrameSubset& fs = mTimeline.GetSubset();
+ 
+-	if (newFrameCount < oldFrameCount && VDPreferencesGetTimelineWarnReloadTruncation()) {
++	if (!playlistSource && newFrameCount < oldFrameCount && VDPreferencesGetTimelineWarnReloadTruncation()) {
+ 		FrameSubset::const_iterator it(fs.begin()), itEnd(fs.end());
+ 
+ 		if (it != itEnd) {
+@@ -1717,25 +1719,24 @@ void VDProject::InnerReopen() {
+ 		}
+ 	}
+ 
+-	// Swap the sources.
++	AudioSources newAudioSources;
++	vdrefptr<AudioSource> audio;
++	for (int i = 0; newInput->GetAudioSource(i, ~audio); ++i) {
++		audio->setDecodeErrorMode(g_audioErrorMode);
++		newAudioSources.push_back(audio);
++	}
++
++	// Retire frame requests that reference the old decoder before replacing it.
++	if (playlistSource) StopFilters();
+ 
+ 	if (g_pInputOpts) delete g_pInputOpts;
+-	g_pInputOpts = newOptions;
++	g_pInputOpts = newOptions.release();
+ 
+ 	inputAudio = NULL;
+ 	inputAudio2 = NULL;
+ 	inputAVI = newInput;
+ 	inputVideo = pVS;
+-
+-	mInputAudioSources.clear();
+-
+-	{
+-		vdrefptr<AudioSource> pTempAS;
+-		for(int i=0; inputAVI->GetAudioSource(i, ~pTempAS); ++i) {
+-			mInputAudioSources.push_back(pTempAS);
+-			pTempAS->setDecodeErrorMode(g_audioErrorMode);
+-		}
+-	}
++	mInputAudioSources.swap(newAudioSources);
+ 
+ 	wcscpy(g_szInputAVIFile, filename.c_str());
+ 
+@@ -1748,7 +1749,12 @@ void VDProject::InnerReopen() {
+ 
+ 	ClearUndoStack();
+ 
+-	if (oldFrameCount > newFrameCount)
++	if (playlistSource) {
++		mTimeline.SetFromSource();
++		mTimeline.ClearMarker();
++		ClearSelection(false);
++		ClearZoomRange();
++	} else if (oldFrameCount > newFrameCount)
+ 		fs.trimInputRange(newFrameCount);
+ 	else if (oldFrameCount < newFrameCount)
+ 		fs.addRangeMerge(oldFrameCount, newFrameCount - oldFrameCount, false, 0);
+@@ -1765,7 +1771,9 @@ void VDProject::InnerReopen() {
+ 	mLastDisplayedInputFrame = -1;
+ 	mLastDisplayedTimelineFrame = -1;
+ 
+-	if (newFrameCount < oldFrameCount) {
++	if (playlistSource && mposCurrentFrame >= newFrameCount) {
++		MoveToFrame(newFrameCount > 0 ? newFrameCount - 1 : 0);
++	} else if (newFrameCount < oldFrameCount) {
+ 		if (!IsSelectionEmpty() && mposSelectionEnd > newFrameCount)
+ 			SetSelectionEnd(newFrameCount, false);
+ 
+diff --git a/src/VirtualDub/source/projectui.cpp b/src/VirtualDub/source/projectui.cpp
+index 649965e53ff25b7ffe11655dae3236e63785d981..2402f0ec62121f285853c5807edec84ec61ab13a 100644
+--- a/src/VirtualDub/source/projectui.cpp
++++ b/src/VirtualDub/source/projectui.cpp
+@@ -1,4 +1,4 @@
+-// VirtualDub - Video processing and capture application
++﻿// VirtualDub - Video processing and capture application
+ //
+ // Copyright (C) 1998-2003 Avery Lee
+ // Copyright (C) 2015-2020 Anton Shekhovtsov
+@@ -8,6 +8,7 @@
+ //
+ 
+ #include <stdafx.h>
++#include "EmbeddedTheme.h"
+ #include <commctrl.h>
+ #include <vfw.h>
+ #include <vd2/system/vdtypes.h>
+@@ -438,6 +439,11 @@ public:
+ LRESULT WINAPI status_proc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam)
+ {
+ 	VDProjectUI* owner = (VDProjectUI*)GetWindowLongPtrW(wnd, GWLP_USERDATA);
++    if(g_VDStartEmbedded){
++        VDEmbeddedTheme::StatusMessage(wnd,msg,wparam,lparam);
++        if(msg==WM_PAINT)return VDEmbeddedTheme::PaintStatus(wnd);
++        if(msg==WM_ERASEBKGND)return 1;
++    }
+ 
+ 	switch(msg){
+ 	case WM_SIZE:
+@@ -715,7 +721,8 @@ bool VDProjectUI::Attach(VDGUIHandle hwnd) {
+ 	SendMessageW(mhwndStatus, SB_SIMPLE, TRUE, 0);
+ 
+ 	mbPositionControlVisible = true;
+-	mbStatusBarVisible = true;
++	mbStatusBarVisible = !g_VDStartEmbedded;
++    if(g_VDStartEmbedded)ShowWindow(mhwndStatus,SW_HIDE);
+ 
+ 	// Create position window.
+ 	CreatePositionControl();
+@@ -790,6 +797,7 @@ bool VDProjectUI::Attach(VDGUIHandle hwnd) {
+ 
+ 	// HACK
+ 	HWND hwndBase = vdpoly_cast<IVDUIWindowW32 *>(mpUIBase)->GetHandleW32();
++    if(g_VDStartEmbedded)SetWindowSubclass(hwndBase,VDEmbeddedTheme::CanvasProc,1,0);
+ 	SetWindowLongW(hwndBase, GWL_STYLE, GetWindowLongW(hwndBase, GWL_STYLE) | WS_CLIPCHILDREN);
+ 
+ 	mpUISplitSet = VDCreateUISplitSet();
+@@ -825,7 +833,8 @@ bool VDProjectUI::Attach(VDGUIHandle hwnd) {
+ 	UITimelineUpdated();		// reset the timeline
+ 	UIVideoSourceUpdated();		// necessary because filters can be changed in capture mode
+ 
+-	DragAcceptFiles((HWND)mhwnd, TRUE);
++	// The integrated shell owns file drops across both preview panes.
++	if (!g_VDStartEmbedded) DragAcceptFiles((HWND)mhwnd, TRUE);
+ 
+ 	VDToolsAttach((HWND)mhwnd);
+ 
+@@ -2395,16 +2404,16 @@ bool VDProjectUI::MenuHit(UINT id) {
+ 		case ID_EDIT_UNDO:						Undo();						break;
+ 		case ID_EDIT_REDO:						Redo();						break;
+ 
+-		case ID_EDIT_CUT:						Cut();						break;
++		case ID_EDIT_CUT:						if(!g_VDStartEmbedded)Cut();						break;
+ 		case ID_EDIT_COPY:						Copy();						break;
+-		case ID_EDIT_PASTE:						Paste();					break;
+-		case ID_EDIT_DELETE:					Delete();					break;
++		case ID_EDIT_PASTE:						if(!g_VDStartEmbedded)Paste();					break;
++		case ID_EDIT_DELETE:					if(!g_VDStartEmbedded)Delete();					break;
+ 		case ID_EDIT_CLEAR:						ClearSelection();			break;
+ 		case ID_EDIT_SELECTALL:
+ 			SetSelectionStart(0);
+ 			SetSelectionEnd(GetFrameCount());
+ 			break;
+-		case ID_EDIT_CROPTOSELECTION:			CropToSelection();			break;
++		case ID_EDIT_CROPTOSELECTION:			if(!g_VDStartEmbedded)CropToSelection();			break;
+ 
+ 		case ID_VIEW_POSITIONCONTROL:
+ 			mbPositionControlVisible = !mbPositionControlVisible;
+@@ -2415,6 +2424,7 @@ bool VDProjectUI::MenuHit(UINT id) {
+ 			break;
+ 
+ 		case ID_VIEW_STATUSBAR:
++            if(g_VDStartEmbedded)break;
+ 			mbStatusBarVisible = !mbStatusBarVisible;
+ 			if (mhwndStatus) {
+ 				ShowWindow(mhwndStatus, mbStatusBarVisible ? SW_SHOWNA : SW_HIDE);
+@@ -2880,7 +2890,7 @@ bool VDProjectUI::MenuHit(UINT id) {
+ 
+ 	if (!bJobActive) {
+ 		JobUnlockDubber();
+-		DragAcceptFiles((HWND)mhwnd, TRUE);
++		if (!g_VDStartEmbedded) DragAcceptFiles((HWND)mhwnd, TRUE);
+ 	}
+ 
+ 	return true;
+@@ -3453,6 +3463,62 @@ LRESULT VDProjectUI::MainWndProc( UINT msg, WPARAM wParam, LPARAM lParam) {
+ 		}
+ 		return 0;
+ 
++	case WM_USER + 105: // Choose a playlist on this embedded pane.
++		if (g_VDStartEmbedded && wParam && (HWND)wParam == GetParent((HWND)mhwnd)) {
++			int result = -1;
++			try {
++				if (inputAVI && !g_dubber && IsWindowEnabled((HWND)mhwnd)) {
++					typedef int (__cdecl *ChoosePlaylist)(HWND, wchar_t*, uint32, void*, uint32);
++					auto choose = (ChoosePlaylist)GetProcAddress(GetModuleHandleW(L"avlib-1.vdplugin"), "VDChooseInputPlaylistW");
++					if (choose) {
++						wchar_t path[MAX_PATH];
++						wcscpy_s(path, g_szInputAVIFile);
++						char options[64] = {};
++						int length = choose((HWND)mhwnd, path, MAX_PATH, options, sizeof(options));
++						if (length == -1) result = 0;
++						else if (length >= 0 && length <= (int)sizeof(options)) {
++							InnerReopen(path, options, (uint32)length);
++							result = 1;
++						}
++					}
++				}
++			} catch (const MyError& e) {
++				e.post((HWND)mhwnd, g_szError);
++			}
++			PostMessageW((HWND)wParam, WM_APP + 105, (WPARAM)mhwnd, result);
++		}
++		return 0;
++
++	case WM_USER + 104: // Live interface language from the A/B controller
++		if (g_VDStartEmbedded && wParam && (HWND)wParam == GetParent((HWND)mhwnd) &&
++			(lParam == 0x0419 || lParam == 0x0409)) {
++			g_VDEmbeddedRussian = lParam == 0x0419;
++			SetEnvironmentVariableW(L"SYNCSYNCAV_UI_LANGUAGE", g_VDEmbeddedRussian ? L"ru" : L"en");
++			SetThreadUILanguage((LANGID)lParam);
++			if (mpPosition) mpPosition->SetDisplayedPosition(mpPosition->GetPosition());
++		}
++		return 0;
++
++	case WM_COPYDATA:
++		if (g_VDStartEmbedded && (HWND)wParam == GetParent((HWND)mhwnd) && wParam && lParam) {
++			const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
++			// Unicode media path from the WPF host. Defer opening just like
++			// the Tool SDK so decoder dialogs run outside SendMessage.
++			if (data->dwData != 0x41424631 || !data->lpData || data->cbData < 4 ||
++				data->cbData > 32768 * sizeof(wchar_t) || data->cbData % sizeof(wchar_t))
++				return FALSE;
++			const auto* path = static_cast<const wchar_t*>(data->lpData);
++			const size_t chars = data->cbData / sizeof(wchar_t);
++			if (wcsnlen(path, chars) != chars - 1 || !IsWindowEnabled((HWND)mhwnd))
++				return FALSE;
++			auto* cmd = new FileNameCommand;
++			cmd->fileName = path;
++			if (PostMessageW((HWND)mhwnd, MYWM_DEFERRED_FILECOMMAND, 0, (LPARAM)cmd))
++				return TRUE;
++			delete cmd;
++		}
++		return FALSE;
++
+ 	case WM_DROPFILES:
+ 		HandleDragDrop((HDROP)wParam);
+ 		DragFinish((HDROP)wParam);
+@@ -4096,6 +4162,14 @@ void VDProjectUI::RepositionPanes(bool reset) {
+ 		}
+ 	}
+ 
++    if(g_VDStartEmbedded){
++        int total=0;for(int i=0;i<n;++i){RECT r;GetWindowRect(panes[i],&r);total+=r.bottom-r.top;}
++        int y=std::max<int>(0,((rWork.bottom-rWork.top)-total)/2);
++        for(int i=0;i<n;++i){RECT r;GetWindowRect(panes[i],&r);MapWindowPoints(NULL,(HWND)mhwnd,(POINT*)&r,2);
++            int centered=g_vertical&&n>1?y:std::max<int>(0,((rWork.bottom-rWork.top)-(r.bottom-r.top))/2);
++            VDGetIVideoWindow(panes[i])->Move(r.left,centered);y+=r.bottom-r.top;
++        }
++    }
+ 	for(int i=0; i<n; ++i) {
+ 		HWND h = panes[i];
+ 		IVDVideoWindow *w = VDGetIVideoWindow(h);
+@@ -4815,7 +4889,7 @@ void VDProjectUI::UIRefreshInputFrame(const VDPixmap *px) {
+ 	if (px) {
+ 		pDisp->SetSource(true, *px);
+ 	} else {
+-		pDisp->SetSourceSolidColor(0xFF000000 + (VDSwizzleU32(GetSysColor(COLOR_APPWORKSPACE) & 0xFFFFFF) >> 8));
++		pDisp->SetSourceSolidColor(0xFF000000 + (VDSwizzleU32((g_VDStartEmbedded?VDEmbeddedTheme::Canvas:GetSysColor(COLOR_APPWORKSPACE)) & 0xFFFFFF) >> 8));
+ 	}
+ }
+ 
+@@ -4827,7 +4901,7 @@ void VDProjectUI::UIRefreshOutputFrame(const VDPixmap *px) {
+ 	if (px) {
+ 		pDisp->SetSource(true, *px);
+ 	} else {
+-		pDisp->SetSourceSolidColor(0xFF000000 + (VDSwizzleU32(GetSysColor(COLOR_APPWORKSPACE) & 0xFFFFFF) >> 8));
++		pDisp->SetSourceSolidColor(0xFF000000 + (VDSwizzleU32((g_VDStartEmbedded?VDEmbeddedTheme::Canvas:GetSysColor(COLOR_APPWORKSPACE)) & 0xFFFFFF) >> 8));
+ 	}
+ }
+ 
+@@ -5399,7 +5473,9 @@ bool VDProjectUI::GetFrameString(wchar_t *buf, size_t buflen, VDPosition dstFram
+ 
+ 	const VDStringW& format = VDPreferencesGetTimelineFormat();
+ 	const wchar_t *s = format.data();
+-	const wchar_t *end = s + format.length();
++	if (g_VDEmbeddedRussian && !wcscmp(s, L"Frame %f (%t) [%c]"))
++		s = L"Кадр %f (%t) [%c]";
++	const wchar_t *end = s + wcslen(s);
+ 
+ 	try {
+ 		bool bMasked = false;
+diff --git a/src/VirtualDub/source/uiframe.cpp b/src/VirtualDub/source/uiframe.cpp
+index f76b361bfc90b232da677daec7e3b9879c4a1bc0..5d8ced3a146e92b21bffdd9b0af25b90b3d88faa 100644
+--- a/src/VirtualDub/source/uiframe.cpp
++++ b/src/VirtualDub/source/uiframe.cpp
+@@ -8,6 +8,7 @@
+ //
+ 
+ #include "stdafx.h"
++#include "EmbeddedTheme.h"
+ #include <vd2/system/w32assist.h>
+ #include "oshelper.h"
+ #include "uiframe.h"
+@@ -188,7 +189,7 @@ ATOM VDUIFrame::Register()
+     wc.hInstance		= g_hInst;
+     wc.hIcon			= LoadIconW(g_hInst, MAKEINTRESOURCEW(IDI_VIRTUALDUB));
+     wc.hCursor			= LoadCursorW(NULL, IDC_ARROW);
+-    wc.hbrBackground	= (HBRUSH)(COLOR_3DFACE+1); //GetStockObject(LTGRAY_BRUSH);
++    wc.hbrBackground	= (g_VDStartEmbedded ? VDEmbeddedTheme::CanvasBrush() : (HBRUSH)(COLOR_3DFACE+1)); //GetStockObject(LTGRAY_BRUSH);
+ 	wc.lpszMenuName		= MAKEINTRESOURCEW(IDR_MAIN_MENU);
+ 	wc.lpszClassName	= szAppNameW;
+ 
+@@ -201,13 +202,25 @@ bool VDUIFrame::TranslateAcceleratorMessage(MSG& msg) {
+ 	if (!msg.hwnd || (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN && msg.message != WM_KEYUP && msg.message != WM_SYSKEYUP && msg.message != WM_CHAR))
+ 		return false;
+ 
+-	HWND hwnd = VDGetAncestorW32(msg.hwnd, GA_ROOT);
+-
+-	ATOM a = (ATOM)GetClassLongPtrW(hwnd, GCW_ATOM);
+-
+-	if (a != sClass)
++	// Find the editor frame even when embedded in another application's panel.
++	HWND hwnd = msg.hwnd;
++	while (hwnd && (ATOM)GetClassLongPtrW(hwnd, GCW_ATOM) != sClass) {
++		if (!(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD))
++			return false;
++		hwnd = GetParent(hwnd);
++	}
++	if (!hwnd)
+ 		return false;
+ 
++    // The integrated comparison surface has no timeline-editing commands.
++    if(g_VDStartEmbedded&&(msg.message==WM_KEYDOWN||msg.message==WM_KEYUP)){
++        bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
++        if(msg.wParam==VK_DELETE||(ctrl&&(msg.wParam=='X'||msg.wParam=='V')))return true;
++        if(ctrl&&(GetKeyState(VK_SHIFT)&0x8000)&&msg.wParam=='Z'){
++            if(msg.message==WM_KEYDOWN)SendMessageW(hwnd,WM_COMMAND,ID_EDIT_REDO,0);
++            return true;
++        }
++    }
+ 	VDUIFrame* p = (VDUIFrame*)GetWindowLongPtrW(hwnd, 0);
+ 
+ 	if (p->mhAccel && TranslateAcceleratorW(hwnd, p->mhAccel, &msg)) {
+@@ -235,6 +248,17 @@ BOOL CALLBACK BroadcastMsgProc(HWND hWnd, LPARAM lParam) {
+ 
+ LRESULT CALLBACK VDUIFrame::StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+ 	VDUIFrame *p;
++    if(g_VDStartEmbedded && msg==WM_ERASEBKGND){RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wParam,&r,VDEmbeddedTheme::CanvasBrush());return 1;}
++	extern bool g_VDStartEmbedded;
++	if (g_VDStartEmbedded && !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD)) {
++		if (msg == WM_WINDOWPOSCHANGING)
++			((WINDOWPOS*)lParam)->flags &= ~SWP_SHOWWINDOW;
++		if (msg == WM_STYLECHANGING && (int)wParam == GWL_STYLE) {
++			STYLESTRUCT *change = (STYLESTRUCT*)lParam;
++			if (!(change->styleNew & WS_CHILD))
++				change->styleNew &= ~WS_VISIBLE;
++		}
++	}
+ 
+ 	if (msg == WM_NCCREATE) {
+ 		p = new_nothrow VDUIFrame(hwnd);
+diff --git a/update_revision.cmd b/update_revision.cmd
+index 76d2095e6a4f81dc072a47e009ac3b88741a74ab..bccbc3293ec70f9f49c3a6227c18dccef99efc0e 100644
+--- a/update_revision.cmd
++++ b/update_revision.cmd
+@@ -2,6 +2,9 @@
+ SETLOCAL
+ CD /D %~dp0
+ 
++REM Source archive builds retain the included upstream revision metadata.
++IF NOT EXIST .git IF EXIST revision.h EXIT /B 0
++
+ ECHO #pragma once > revision.h
+ 
+ SET gitexe="git.exe"

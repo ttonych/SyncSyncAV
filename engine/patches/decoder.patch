@@ -1,0 +1,4177 @@
+diff --git a/src/AudioSource2.cpp b/src/AudioSource2.cpp
+index 9809fa00e981b64e68b545675e2858636a4291e3..a983782a69d068ce1258c1bd2c14a176930aeb92 100644
+--- a/src/AudioSource2.cpp
++++ b/src/AudioSource2.cpp
+@@ -72,7 +72,7 @@ uint64_t GetChannelLayout(AVCodecContext* pCodecCtx)
+ 
+ int VDFFAudioSource::initStream(VDFFInputFile* pSource, int streamIndex)
+ {
+-	m_pFormatCtx = OpenAudioFile(pSource->m_path, streamIndex);
++	m_pFormatCtx = OpenAudioFile(pSource, streamIndex);
+ 	if (!m_pFormatCtx) {
+ 		return -1;
+ 	}
+@@ -132,6 +132,14 @@ int VDFFAudioSource::initStream(VDFFInputFile* pSource, int streamIndex)
+ 	}
+ 
+ 	use_keys = false;
++	if (pSource->mpls_out45) {
++		int vi = pSource->find_stream(m_pFormatCtx, AVMEDIA_TYPE_VIDEO);
++		if (vi >= 0) {
++			int64_t in45 = av_rescale_q(pSource->video_start_time, m_pFormatCtx->streams[vi]->time_base, AVRational{1,45000});
++			int64_t needed = av_rescale_q(int64_t(pSource->mpls_out45)-in45, AVRational{1,45000}, AVRational{1,m_pCodecCtx->sample_rate});
++			sample_count = std::max(sample_count, needed);
++		}
++	}
+ 	int nb_index_entries = avformat_index_get_entries_count(m_pStream);
+ 	if (nb_index_entries < 60) {
+ 		// go to the last record of the current index and back. this will fill up the index a bit.
+@@ -140,7 +148,9 @@ int VDFFAudioSource::initStream(VDFFInputFile* pSource, int streamIndex)
+ 		// works for MKV and FLV
+ 		const AVIndexEntry* ie = avformat_index_get_entry(m_pStream, nb_index_entries - 1);
+ 		if (ie) {
+-			seek_frame(m_pFormatCtx, m_streamIndex, ie->pos, AVSEEK_FLAG_BACKWARD);
++			// av_seek_frame expects a timestamp in the stream time base, not
++			// the byte offset. Passing pos could scan a large MKV to its end.
++			seek_frame(m_pFormatCtx, m_streamIndex, ie->timestamp, AVSEEK_FLAG_BACKWARD);
+ 			seek_frame(m_pFormatCtx, m_streamIndex, AV_SEEK_START, AVSEEK_FLAG_BACKWARD);
+ 			// get the number of index entries again
+ 			nb_index_entries = avformat_index_get_entries_count(m_pStream);
+@@ -191,14 +201,12 @@ int VDFFAudioSource::initStream(VDFFInputFile* pSource, int streamIndex)
+ 	return 0;
+ }
+ 
+-AVFormatContext* VDFFAudioSource::OpenAudioFile(std::wstring_view path, int streamIndex)
++AVFormatContext* VDFFAudioSource::OpenAudioFile(VDFFInputFile* source, int streamIndex)
+ {
+ 	assert(streamIndex >= 0);
+ 
+-	std::string ff_path = ConvertWideToUtf8(path);
+-
+ 	AVFormatContext* fmt = nullptr;
+-	int err = avformat_open_input(&fmt, ff_path.c_str(), nullptr, nullptr);
++	int err = source->OpenMediaInput(&fmt,isoAudioReader);
+ 	if (err < 0) {
+ 		mContext.mpCallbacks->SetError("FFMPEG open failure:\n%s", get_last_av_error().c_str());
+ 		return nullptr;
+@@ -464,8 +472,13 @@ bool VDFFAudioSource::Read(int64_t start, uint32_t count, void* lpBuffer, uint32
+ 	if (next_sample == AV_NOPTS_VALUE || start > next_sample + m_pCodecCtx->sample_rate || start < next_sample) {
+ 		// required to seek
+ 		discard_samples = int(start >= 4096 ? 4096 : start);
+-		int64_t pos = (start - discard_samples) * time_base.den / time_base.num - time_adjust;
+-		if (start == 0) {
++		// MPEG-TS/TrueHD can resume with one stale PTS followed by a timestamp jump.
++		// Give MPLS clips a bounded one-second preroll and retain the real timestamps.
++		int preroll = m_pSource->mpls_out45 ? m_pCodecCtx->sample_rate : discard_samples;
++		int64_t pos = (start - preroll) * time_base.den / time_base.num - time_adjust;
++		if (m_pSource->mpls_out45 && m_pStream->start_time != AV_NOPTS_VALUE)
++			pos = std::max(pos, m_pStream->start_time);
++		if (start == 0 && !m_pSource->mpls_out45) {
+ 			pos = AV_SEEK_START;
+ 			discard_samples = 0;
+ 		}
+@@ -633,8 +646,11 @@ int VDFFAudioSource::read_packet(AVPacket* pkt, ReadInfo& ri)
+ 			if (m_pFrame->pts == start_time) {
+ 				discard_samples = 0;
+ 			}
+-			frame_start = (m_pFrame->pts + time_adjust) * time_base.num / time_base.den;
+-			if (next_sample != AV_NOPTS_VALUE && frame_start != next_sample) {
++			frame_start = m_pSource->mpls_out45
++				? av_rescale_q(m_pFrame->pts + time_adjust, m_pStream->time_base, AVRational{1,m_pCodecCtx->sample_rate})
++				: (m_pFrame->pts + time_adjust) * time_base.num / time_base.den;
++			if (next_sample != AV_NOPTS_VALUE && frame_start != next_sample &&
++				(!m_pSource->mpls_out45 || llabs(frame_start-next_sample)<=1)) {
+ 				trust_sample_pos = false;
+ 				frame_start = next_sample;
+ 			}
+@@ -667,7 +683,7 @@ int VDFFAudioSource::read_packet(AVPacket* pkt, ReadInfo& ri)
+ 		if (start < 0) {
+ 			int64_t n = -start;
+ 			if (n < count) {
+-				src_pos = int(n);
++				src_pos += int(n);
+ 				start = 0;
+ 				count -= int(n);
+ 
+diff --git a/src/AudioSource2.h b/src/AudioSource2.h
+index 4805503c2b44123e5fcb61553ff3a7d8c11d7a76..0a38649fadc6e998a2c888e831fad48b56d4b63a 100644
+--- a/src/AudioSource2.h
++++ b/src/AudioSource2.h
+@@ -10,6 +10,8 @@
+ #include <vd2/plugin/vdinputdriver.h>
+ #include <vd2/VDXFrame/Unknown.h>
+ #include <vector>
++#include <memory>
++class IsoReader;
+ #include <mmreg.h>
+ #include "stdint.h"
+ 
+@@ -61,6 +63,7 @@ private:
+ 	int64_t time_adjust  = 0;
+ 
+ 	AVFormatContext* m_pFormatCtx = nullptr;
++	std::shared_ptr<IsoReader> isoAudioReader;
+ public:
+ 	AVStream*       m_pStream   = nullptr;
+ 	AVCodecContext* m_pCodecCtx = nullptr;
+@@ -108,7 +111,7 @@ private:
+ 
+ public:
+ 	int initStream(VDFFInputFile* pSource, int streamIndex);
+-	AVFormatContext* OpenAudioFile(std::wstring_view path, int streamIndex);
++	AVFormatContext* OpenAudioFile(VDFFInputFile* source, int streamIndex);
+ private:
+ 	void init_start_time();
+ 	int read_packet(AVPacket* pkt, ReadInfo& ri);
+diff --git a/src/InputFile2.cpp b/src/InputFile2.cpp
+index d03b90fb97e19d9ccefccfc270ccc491b2a539f6..36fd09ee17aa84233445e867f173c8ee4b7ba72c 100644
+--- a/src/InputFile2.cpp
++++ b/src/InputFile2.cpp
+@@ -8,8 +8,13 @@
+ #include "stdafx.h"
+ 
+ #include "InputFile2.h"
++#include "Mpls.h"
++#include "IsoDisc.h"
+ #include "FileInfo2.h"
+ #include "VideoSource2.h"
++#include "InputMetadata.h"
++#include <map>
++#include <mutex>
+ #include "AudioSource2.h"
+ #include "mov_mp4.h"
+ #include "export.h"
+@@ -33,6 +38,53 @@ extern bool config_decode_raw;
+ extern bool config_decode_magic;
+ extern bool config_disable_cache;
+ 
++namespace {
++struct PublishedInput { std::wstring source; VDInputMetadataV1 value{}; };
++std::mutex inputMetadataMutex;
++std::map<const VDFFInputFile*, PublishedInput> inputMetadata;
++void PublishInput(const VDFFInputFile* file) {
++    if (!file->video_source) return;
++    PublishedInput p;
++    p.source = file->m_path;
++    p.value.version = 1;
++    const auto& info = file->video_source->m_streamInfo.mInfo;
++    p.value.fps_num = info.mSampleRate.mNumerator;
++    p.value.fps_den = info.mSampleRate.mDenominator;
++    p.value.source_frames = info.mSampleCount;
++    VDXVideoSourceInfo video{};
++    file->video_source->GetVideoSourceInfo(video);
++    p.value.width = video.mWidth; p.value.height = video.mHeight;
++    const char* codec = "Video";
++    if (file->playlist && !file->playlist->items.empty())
++        codec = file->playlist->items.front().codec == 0x24 ? "HEVC" : "AVC";
++    else if (file->video_source->m_pCodecCtx)
++        codec = avcodec_get_name(file->video_source->m_pCodecCtx->codec_id);
++    strncpy_s(p.value.codec, codec, _TRUNCATE);
++    const auto& resolved = file->playlist ? file->playlist->path : file->m_path;
++    wcsncpy_s(p.value.resolved_path, resolved.c_str(), _TRUNCATE);
++    // Publish values only after initialization. Readers never touch the decoder.
++    std::lock_guard<std::mutex> guard(inputMetadataMutex);
++    inputMetadata[file] = std::move(p);
++}
++}
++extern "C" __declspec(dllexport) int __cdecl VDReadInputMetadata(
++    const wchar_t* source, VDInputMetadataV1* value, uint32_t size) {
++    if (!source || !value || size != sizeof(VDInputMetadataV1)) return 0;
++    std::lock_guard<std::mutex> guard(inputMetadataMutex);
++    const VDInputMetadataV1* found = nullptr;
++    for (const auto& item : inputMetadata) {
++        if (_wcsicmp(item.second.source.c_str(), source)) continue;
++        const auto& m = item.second.value;
++        if (found && (found->fps_num != m.fps_num || found->fps_den != m.fps_den ||
++            found->width != m.width || found->height != m.height ||
++            wcscmp(found->resolved_path, m.resolved_path))) return 0;
++        found = &m;
++    }
++    if (!found) return 0;
++    *value = *found;
++    return 1;
++}
++
+ bool FileExist(const wchar_t* name)
+ {
+ 	DWORD a = GetFileAttributesW(name);
+@@ -396,11 +448,19 @@ int VDXAPIENTRY VDFFInputFileDriver::DetectBySignature2(VDXMediaInfo& info, cons
+ 
+ int VDXAPIENTRY VDFFInputFileDriver::DetectBySignature3(VDXMediaInfo& info, const void* pHeader, sint32 nHeaderSize, const void* pFooter, sint32 nFooterSize, sint64 nFileSize, const wchar_t* fileName)
+ {
++	if (pHeader && nHeaderSize >= 4 && (!memcmp(pHeader, "MPLS", 4) || !memcmp(pHeader, "INDX", 4))) {
++		copyCharToWchar(info.format_name, std::size(info.format_name), "Blu-ray playlist");
++		return kDC_High;
++	}
+ 	if (fileName) {
+ 		const wchar_t* p = GetFileExt(fileName);
+ 		if (p) {
+ 			std::wstring ext(p);
+ 			str_tolower(ext);
++			if (ext == L".iso") {
++				copyCharToWchar(info.format_name, std::size(info.format_name), "Blu-ray ISO");
++				return kDC_Low;
++			}
+ 			if (ext == L".avs") {
+ 				// identifying AviSynth scripts by extension
+ 				// because avformat_open_input can take a very long time to open a file (FFmpegSource2)
+@@ -534,6 +594,7 @@ VDFFInputFile::VDFFInputFile(const VDXInputDriverContext& context)
+ 
+ VDFFInputFile::~VDFFInputFile()
+ {
++    { std::lock_guard<std::mutex> guard(inputMetadataMutex); inputMetadata.erase(this); }
+ 	if (next_segment) {
+ 		next_segment->Release();
+ 	}
+@@ -550,6 +611,10 @@ VDFFInputFile::~VDFFInputFile()
+ 
+ void VDFFInputFile::DisplayInfo(VDXHWND hwndParent)
+ {
++	if (playlist) {
++		MessageBoxW((HWND)hwndParent, playlist->description().c_str(), L"Blu-ray playlist", MB_OK);
++		return;
++	}
+ 	VDFFInputFileInfoDialog dlg;
+ 	dlg.Show(hwndParent, this);
+ }
+@@ -575,6 +640,12 @@ void VDFFInputFile::Init(const wchar_t* szFile, IVDXInputOptions* in_opts)
+ 	}
+ 
+ 	m_path = szFile;
++	if (IsMplsPath(szFile)) {
++		const auto* options = static_cast<const VDFFInputFileOptions*>(in_opts);
++		playlist = OpenMpls(szFile, mContext, options ? options->data.iso_playlist : -1);
++		auto_append = false;
++		return;
++	}
+ 
+ 	init_av();
+ 	//! this context instance is granted to video stream: wasted in audio-only mode
+@@ -588,6 +659,7 @@ void VDFFInputFile::Init(const wchar_t* szFile, IVDXInputOptions* in_opts)
+ 
+ int VDFFInputFile::GetFileFlags()
+ {
++	if (playlist) return 0;
+ 	int flags = VDFFInputFileDriver::kFF_AppendSequence;
+ 	if (is_image_list) flags |= VDFFInputFileDriver::kFF_Sequence;
+ 	return flags;
+@@ -715,14 +787,19 @@ bool VDXAPIENTRY VDFFInputFile::Append2(const wchar_t* szFile, int flags, IVDXIn
+ 	return true;
+ }
+ 
+-AVFormatContext* VDFFInputFile::OpenVideoFile()
++int VDFFInputFile::OpenMediaInput(AVFormatContext** format, std::shared_ptr<IsoReader>& reader)
+ {
+-	std::string ff_path = ConvertWideToUtf8(m_path);
++    if (!image) return avformat_open_input(format, ConvertWideToUtf8(m_path).c_str(), nullptr, nullptr);
++    reader = std::make_shared<IsoReader>(image,m_path);
++    return reader->openFormat(format);
++}
+ 
++AVFormatContext* VDFFInputFile::OpenVideoFile()
++{
+ 	AVFormatContext* fmt = nullptr;
+ 	int err = 0;
+ 	try {
+-		err = avformat_open_input(&fmt, ff_path.c_str(), nullptr, nullptr);
++		err = OpenMediaInput(&fmt,isoVideoReader);
+ 	}
+ 	catch (const std::system_error& e) {
+ 		mContext.mpCallbacks->SetError("FFMPEG caught std::system_error: %s\nCode: %d", e.what(), e.code().value());
+@@ -813,7 +890,7 @@ AVFormatContext* VDFFInputFile::OpenVideoFile()
+ 				is_image_list = true;
+ 				auto_append = false;
+ 				avformat_close_input(&fmt);
+-				ff_path = ConvertWideToUtf8(list_path);
++				const std::string ff_path = ConvertWideToUtf8(list_path);
+ 				AVDictionary* options = nullptr;
+ 				av_dict_set_int(&options, "start_number", start, 0);
+ 				if (r_fr.num != 0) {
+@@ -938,6 +1015,17 @@ int VDFFInputFile::find_stream(AVFormatContext* fmt, AVMediaType type)
+ bool VDFFInputFile::GetVideoSource(int index, IVDXVideoSource** ppVS)
+ {
+ 	if (ppVS) *ppVS = nullptr;
++	if (playlist) {
++		if (index != 0) return false;
++		if (!video_source) {
++			video_source = CreateMplsVideo(mContext, playlist);
++			if (!video_source) return false;
++			video_source->AddRef();
++		}
++		if (ppVS) { *ppVS = video_source; video_source->AddRef(); }
++		PublishInput(this);
++		return true;
++	}
+ 
+ 	if (!m_pFormatCtx) return false;
+ 	if (index != 0) return false;
+@@ -965,12 +1053,20 @@ bool VDFFInputFile::GetVideoSource(int index, IVDXVideoSource** ppVS)
+ 		video_source->m_streamInfo.mInfo.mSampleCount += next_segment->video_source->m_streamInfo.mInfo.mSampleCount;
+ 	}
+ 
++	PublishInput(this);
+ 	return true;
+ }
+ 
+ bool VDFFInputFile::GetAudioSource(int index, IVDXAudioSource** ppAS)
+ {
+ 	if (ppAS) *ppAS = nullptr;
++	if (playlist) {
++		auto p = CreateMplsAudio(mContext, playlist, index);
++		if (!p) return false;
++		p->AddRef();
++		if (ppAS) *ppAS = p; else p->Release();
++		return true;
++	}
+ 
+ 	if (!m_pFormatCtx) return false;
+ 
+@@ -1026,6 +1122,13 @@ bool VDFFInputFile::GetAudioSource(int index, IVDXAudioSource** ppAS)
+ 
+ int seek_frame(AVFormatContext* s, int stream_index, int64_t timestamp, int flags)
+ {
++	// AV_SEEK_START is our sentinel, not an MPEG-TS timestamp. A timestamp
++	// search before the first PTS can fall back to scanning the whole disc.
++	// Rewind the demuxer by byte position so its packet/parser state is reset.
++	if (timestamp == AV_SEEK_START && s->iformat == av_find_input_format("mpegts")) {
++		return av_seek_frame(s, -1, 0, AVSEEK_FLAG_BYTE);
++	}
++
+ 	int ret = av_seek_frame(s, stream_index, timestamp, flags);
+ 
+ 	if (ret == AVERROR(EPERM) && timestamp <= AV_SEEK_START) {
+diff --git a/src/InputFile2.h b/src/InputFile2.h
+index 05725ba1c753a8a947bf9aecba699426180b43cc..1b7083ca1aa035e7add5ed25e54750e74edb1f91 100644
+--- a/src/InputFile2.h
++++ b/src/InputFile2.h
+@@ -10,12 +10,15 @@
+ #define __STDC_LIMIT_MACROS
+ #include <vd2/plugin/vdinputdriver.h>
+ #include <vd2/VDXFrame/Unknown.h>
++#include <memory>
++#include "Mpls.h"
+ 
+ extern "C"
+ {
+ #include <libavformat/avformat.h>
+ }
+ 
++class IsoReader;
+ class VDFFVideoSource;
+ class VDFFAudioSource;
+ 
+@@ -51,17 +54,19 @@ protected:
+ class VDFFInputFileOptions : public vdxunknown<IVDXInputOptions>
+ {
+ public:
+-	enum { opt_version = 3 };
++	enum { opt_version = 4 };
+ 
+ #pragma pack(push,1)
+ 	struct Data {
+ 		int version;
+ 		bool disable_cache;
++		int32_t iso_playlist;
+ 
+ 		Data() { clear(); }
+ 		void clear() {
+ 			version = opt_version;
+ 			disable_cache = false;
++			iso_playlist = -1;
+ 		}
+ 	} data;
+ #pragma pack(pop)
+@@ -78,6 +83,10 @@ public:
+ 		if (d->version >= 2) {
+ 			data.disable_cache = d->disable_cache;
+ 		}
++		if (d->version >= 4) {
++			if (len < sizeof(Data) || d->iso_playlist < -1 || d->iso_playlist > 99999) return false;
++			data.iso_playlist = d->iso_playlist;
++		}
+ 		return true;
+ 	}
+ 
+@@ -103,6 +112,12 @@ public:
+ 	bool is_anim_image = false;
+ 
+ 	bool is_mp4 = false;
++	std::shared_ptr<MplsPlaylist> playlist;
++	std::shared_ptr<IsoDisc> image;
++	std::shared_ptr<IsoReader> isoVideoReader;
++	uint32_t mpls_out45 = 0;
++	uint64_t mpls_cache_bytes = 0;
++	std::vector<MplsSeekPoint> mpls_seek_points;
+ 
+ 	int  cfg_frame_buffers = 0;
+ 	bool cfg_disable_cache = false;
+@@ -152,6 +167,7 @@ public:
+ 	AVFormatContext* getContext(void) { return m_pFormatCtx; }
+ 	int find_stream(AVFormatContext* fmt, AVMediaType type);
+ 	AVFormatContext* OpenVideoFile();
++	int OpenMediaInput(AVFormatContext** format, std::shared_ptr<IsoReader>& reader);
+ 	bool detect_image_list(wchar_t* dst, int dst_count, int* start, int* count);
+ 	void do_auto_append(const wchar_t* szFile);
+ 
+diff --git a/src/InputMetadata.h b/src/InputMetadata.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..a23ef414d8be5a53ecc28d7017a7db03c50623ef
+--- /dev/null
++++ b/src/InputMetadata.h
+@@ -0,0 +1,11 @@
++// Optional, read-only metadata ABI for the local control bridge. SPDX-License-Identifier: MIT
++#pragma once
++#include <stdint.h>
++struct VDInputMetadataV1 {
++    uint32_t version, fps_num, fps_den, width, height;
++    int64_t source_frames;
++    char codec[32];
++    wchar_t resolved_path[32768];
++};
++extern "C" __declspec(dllexport) int __cdecl VDReadInputMetadata(const wchar_t*, VDInputMetadataV1*, uint32_t);
++typedef int (__cdecl *VDReadInputMetadataV1)(const wchar_t*, VDInputMetadataV1*, uint32_t);
+diff --git a/src/IsoDisc.cpp b/src/IsoDisc.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8a5a5d9269c65fb7914c8cc756128e8ed43bef73
+--- /dev/null
++++ b/src/IsoDisc.cpp
+@@ -0,0 +1,150 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "stdafx.h"
++#include "IsoDisc.h"
++#include "Utils/StringUtil.h"
++#include <objbase.h>
++#pragma comment(lib,"ole32.lib")
++extern "C" {
++#include <libavformat/avformat.h>
++}
++#include <algorithm>
++#include <stdexcept>
++
++extern HINSTANCE hInstance;
++namespace fs = std::filesystem;
++namespace {
++struct UdfApi {
++    HMODULE module = nullptr;
++    decltype(&udfread_init) init;
++    decltype(&udfread_open) openVolume;
++    decltype(&udfread_close) close;
++    decltype(&udfread_opendir) openDir;
++    decltype(&udfread_readdir) readDir;
++    decltype(&udfread_closedir) closeDir;
++    decltype(&udfread_file_open) openFile;
++    decltype(&udfread_file_close) closeFile;
++    decltype(&udfread_file_read) read;
++    decltype(&udfread_file_seek) seek;
++    decltype(&udfread_file_size) size;
++
++    template<class F> void load(F& function, const char* name) {
++        function = reinterpret_cast<F>(GetProcAddress(module, name));
++        if (!function) throw std::runtime_error("Incomplete libudfread API");
++    }
++    UdfApi() {
++        wchar_t exe[32768];
++        DWORD n = GetModuleFileNameW(hInstance, exe, DWORD(std::size(exe)));
++        if (!n || n >= std::size(exe)) throw std::runtime_error("Cannot locate ISO reader");
++        auto dll = fs::path(exe).parent_path() / L"libbluray" / L"udfread-3.dll";
++        module = LoadLibraryExW(dll.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
++        if (!module) throw std::runtime_error("Cannot load bundled libudfread");
++        try {
++            load(init,"udfread_init"); load(openVolume,"udfread_open"); load(close,"udfread_close");
++            load(openDir,"udfread_opendir"); load(readDir,"udfread_readdir"); load(closeDir,"udfread_closedir");
++            load(openFile,"udfread_file_open"); load(closeFile,"udfread_file_close");
++            load(read,"udfread_file_read"); load(seek,"udfread_file_seek"); load(size,"udfread_file_size");
++        } catch (...) { FreeLibrary(module); throw; }
++    }
++    ~UdfApi() { FreeLibrary(module); }
++};
++UdfApi& api() { static UdfApi instance; return instance; }
++
++template<class Visitor>
++void visit(udfread* disc, const std::string& path, Visitor visitor) {
++    std::unique_ptr<UDFDIR, decltype(&udfread_closedir)> dir(api().openDir(disc,path.c_str()),api().closeDir);
++    if (!dir) return;
++    udfread_dirent entry{};
++    while (api().readDir(dir.get(), &entry)) visitor(entry);
++}
++}
++
++IsoDisc::IsoDisc(const fs::path& source) : path(source), volume(api().init(),api().close) {
++    if (!volume || api().openVolume(volume.get(),ConvertWideToUtf8(path.wstring()).c_str()) < 0)
++        throw std::runtime_error("Cannot open UDF disc image");
++    // All names used by Blu-ray are ASCII. Retain original spelling for UDF,
++    // which can be case-sensitive, and expose canonical paths to the decoder.
++    std::string bdmv;
++    visit(volume.get(), "/", [&](const udfread_dirent& entry) {
++        if (entry.d_type == UDF_DT_DIR && !_stricmp(entry.d_name,"BDMV")) bdmv = entry.d_name;
++    });
++    if (bdmv.empty()) return;
++    visit(volume.get(), bdmv, [&](const udfread_dirent& dir) {
++        if (dir.d_type != UDF_DT_DIR) return;
++        const char* ext = nullptr;
++        const wchar_t* directory = nullptr;
++        if (!_stricmp(dir.d_name,"PLAYLIST")) { directory=L"PLAYLIST"; ext=".mpls"; }
++        else if (!_stricmp(dir.d_name,"STREAM")) { directory=L"STREAM"; ext=".m2ts"; }
++        else if (!_stricmp(dir.d_name,"CLIPINF")) { directory=L"CLIPINF"; ext=".clpi"; }
++        else return;
++        auto udfDir = bdmv + "/" + dir.d_name;
++        visit(volume.get(), udfDir, [&](const udfread_dirent& file) {
++            if (file.d_type != UDF_DT_REG) return;
++            std::string name(file.d_name);
++            if (name.size()!=5+strlen(ext) || name.find_first_not_of("0123456789")!=5 || _stricmp(name.c_str()+5,ext)) return;
++            auto key = fs::path(L"BDMV") / directory / (name.substr(0,5)+ext);
++            if (members.emplace(key.wstring(),udfDir+"/"+name).second && !strcmp(ext,".mpls"))
++                playlists.push_back(path / key);
++        });
++    });
++}
++IsoFile IsoDisc::open(const fs::path& member) const {
++    auto found = members.find(member.lexically_relative(path).wstring());
++    return IsoFile(found == members.end() ? nullptr : api().openFile(volume.get(),found->second.c_str()),api().closeFile);
++}
++int64_t IsoDisc::size(const fs::path& member) const {
++    auto file = open(member);
++    return file ? api().size(file.get()) : -1;
++}
++
++IsoMetadata::IsoMetadata(const IsoDisc& disc, const fs::path& member, size_t limit) {
++    auto source = disc.open(member);
++    int64_t size = source ? api().size(source.get()) : -1;
++    if (size < 1 || uint64_t(size) > limit) throw std::runtime_error("Invalid ISO metadata size");
++    std::vector<uint8_t> data(static_cast<size_t>(size));
++    if (api().read(source.get(),data.data(),data.size()) != size) throw std::runtime_error("Cannot read ISO metadata");
++    GUID id{};
++    wchar_t name[40];
++    if (FAILED(CoCreateGuid(&id)) || !StringFromGUID2(id,name,int(std::size(name))))
++        throw std::runtime_error("Cannot create metadata filename");
++    path = fs::temp_directory_path() / (std::wstring(L"SyncSyncAV-")+name+L".tmp");
++    output = CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_TEMPORARY,nullptr);
++    if (output == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot create temporary metadata file");
++    DWORD written=0;
++    if (!WriteFile(output,data.data(),DWORD(data.size()),&written,nullptr) || written!=data.size()) {
++        CloseHandle(output); DeleteFileW(path.c_str()); throw std::runtime_error("Cannot write temporary metadata file");
++    }
++}
++IsoMetadata::~IsoMetadata() { CloseHandle(output); DeleteFileW(path.c_str()); }
++
++IsoReader::IsoReader(std::shared_ptr<IsoDisc> image,const fs::path& clip)
++    : disc(std::move(image)),file(disc->open(clip)) {}
++IsoReader::~IsoReader() {
++    if (io) { av_freep(&io->buffer); avio_context_free(&io); }
++}
++int IsoReader::read(void* opaque,uint8_t* data,int size) {
++    auto& self = *static_cast<IsoReader*>(opaque);
++    auto n = api().read(self.file.get(),data,size);
++    return n > 0 ? int(n) : n == 0 ? AVERROR_EOF : AVERROR(EIO);
++}
++int64_t IsoReader::seek(void* opaque,int64_t offset,int whence) {
++    auto& self = *static_cast<IsoReader*>(opaque);
++    whence &= ~AVSEEK_FORCE;
++    if (whence == AVSEEK_SIZE) return api().size(self.file.get());
++    if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) return AVERROR(EINVAL);
++    auto pos = api().seek(self.file.get(),offset,whence);
++    return pos < 0 ? AVERROR(EIO) : pos;
++}
++int IsoReader::openFormat(AVFormatContext** format) {
++    if (!file) return AVERROR(ENOENT);
++    constexpr int bytes = 64*1024;
++    auto buffer = static_cast<uint8_t*>(av_malloc(bytes));
++    if (!buffer) return AVERROR(ENOMEM);
++    io = avio_alloc_context(buffer,bytes,0,this,read,nullptr,seek);
++    if (!io) { av_free(buffer); return AVERROR(ENOMEM); }
++    *format = avformat_alloc_context();
++    if (!*format) return AVERROR(ENOMEM);
++    (*format)->pb = io;
++    (*format)->flags |= AVFMT_FLAG_CUSTOM_IO;
++    return avformat_open_input(format,nullptr,av_find_input_format("mpegts"),nullptr);
++}
++
+diff --git a/src/IsoDisc.h b/src/IsoDisc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..663698b84bbcb407b7cf96faf528ef3d6837896e
+--- /dev/null
++++ b/src/IsoDisc.h
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <filesystem>
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++#include "third_party/udfread.h"
++#undef ssize_t
++
++struct AVFormatContext;
++struct AVIOContext;
++using IsoFile = std::unique_ptr<UDFFILE, decltype(&udfread_file_close)>;
++
++class IsoDisc {
++public:
++    explicit IsoDisc(const std::filesystem::path& path);
++    const std::filesystem::path path;
++    std::vector<std::filesystem::path> playlists;
++    IsoFile open(const std::filesystem::path& member) const;
++    int64_t size(const std::filesystem::path& member) const;
++private:
++    std::unique_ptr<udfread, decltype(&udfread_close)> volume;
++    std::map<std::wstring, std::string> members;
++};
++
++// The existing libbluray metadata parsers take filenames. Only one bounded
++// metadata file is materialized at a time; video and audio are always streamed.
++class IsoMetadata {
++public:
++    IsoMetadata(const IsoDisc& disc, const std::filesystem::path& member, size_t limit);
++    ~IsoMetadata();
++    IsoMetadata(const IsoMetadata&) = delete;
++    std::filesystem::path path;
++private:
++    HANDLE output = INVALID_HANDLE_VALUE;
++};
++
++class IsoReader {
++public:
++    IsoReader(std::shared_ptr<IsoDisc> disc, const std::filesystem::path& clip);
++    ~IsoReader();
++    int openFormat(AVFormatContext** format);
++private:
++    std::shared_ptr<IsoDisc> disc;
++    IsoFile file;
++    AVIOContext* io = nullptr;
++    static int read(void* opaque, uint8_t* data, int size);
++    static int64_t seek(void* opaque, int64_t offset, int whence);
++};
++
+diff --git a/src/Mpls.cpp b/src/Mpls.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc097d5de48b941dcf8e84f98bbeff47e1f1ab48
+--- /dev/null
++++ b/src/Mpls.cpp
+@@ -0,0 +1,468 @@
++﻿// Local Blu-ray playlist support, 2026-10-18. SPDX-License-Identifier: BSD-3-Clause
++#include "stdafx.h"
++#include "Mpls.h"
++#include "IsoDisc.h"
++#include "InputFile2.h"
++#include "InputMetadata.h"
++#include "VideoSource2.h"
++#include "AudioSource2.h"
++#include "third_party/libbluray/bluray.h"
++#include "third_party/libbluray/bdnav/mpls_data.h"
++#include "third_party/libbluray/bdnav/clpi_data.h"
++#include "Utils/StringUtil.h"
++#include <filesystem>
++#include <fstream>
++#include <set>
++#include <array>
++#include <sstream>
++#include <stdexcept>
++#include <cmath>
++#pragma comment(lib,"comctl32.lib")
++extern HINSTANCE hInstance;
++extern bool config_disable_cache;
++namespace fs = std::filesystem;
++namespace {
++bool russianUi() {
++ wchar_t code[3]{};
++ return GetEnvironmentVariableW(L"SYNCSYNCAV_UI_LANGUAGE",code,3)==2 && !wcscmp(code,L"ru");
++}
++struct PlaylistError : std::runtime_error {
++ const wchar_t* russian;
++ PlaylistError(const char* message,const wchar_t* translation):std::runtime_error(message),russian(translation){}
++ std::wstring display() const {
++  if(russianUi())return russian;
++  std::string message=what();
++  return std::wstring(message.begin(),message.end());
++ }
++};
++// Only the metadata API is used: no bd_play, HDMV interpreter or JVM.
++// Pin 1.5.0 because the diagnostic MPLS structs are version-specific.
++struct BlurayApi {
++ HMODULE module=nullptr;
++ decltype(&bd_read_mpls) read=nullptr;
++ decltype(&bd_free_mpls) free=nullptr;
++ decltype(&bd_read_clpi) readClpi=nullptr;
++ decltype(&bd_free_clpi) freeClpi=nullptr;
++ BlurayApi() {
++  wchar_t plugin[32768]{};
++  if(!GetModuleFileNameW(hInstance,plugin,(DWORD)std::size(plugin)))throw PlaylistError("cannot locate plugin",L"Не удалось определить путь к модулю");
++  auto path=fs::path(plugin).parent_path()/L"libbluray"/L"bluray-4.dll";
++  module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
++  if(!module)throw PlaylistError("cannot load bundled libbluray (plugins64/libbluray)",L"Не удалось загрузить libbluray (plugins64/libbluray)");
++  auto version=(decltype(&bd_get_version))GetProcAddress(module,"bd_get_version");
++  read=(decltype(read))GetProcAddress(module,"bd_read_mpls");free=(decltype(free))GetProcAddress(module,"bd_free_mpls");
++  readClpi=(decltype(readClpi))GetProcAddress(module,"bd_read_clpi");freeClpi=(decltype(freeClpi))GetProcAddress(module,"bd_free_clpi");
++  int a=0,b=0,c=0;if(version)version(&a,&b,&c);
++  if(a!=1||b!=5||c!=0||!read||!free){FreeLibrary(module);module=nullptr;throw PlaylistError("libbluray 1.5.0 metadata API is required",L"Требуется libbluray 1.5.0 с поддержкой чтения метаданных");}
++ }
++ ~BlurayApi(){if(module)FreeLibrary(module);}
++};
++std::wstring duration(int64_t ticks) {
++ auto ms=(ticks*1000+22500)/45000;auto s=ms/1000;
++ return std::format(L"{:02}:{:02}:{:02}.{:03}",s/3600,s/60%60,s%60,ms%1000);
++}
++std::wstring videoText(const MplsPlaylist& p) {
++ if(p.items.empty()) return L"";
++ const auto& i=p.items[0];
++ return std::format(L"{} {} / {:.3f}",i.codec==0x24?L"HEVC":i.codec==0x1b?L"AVC":L"Other",
++  i.format==8?L"2160p":i.format==6?L"1080p":L"other",p.fpsDen?double(p.fpsNum)/p.fpsDen:0.0);
++}
++std::shared_ptr<MplsPlaylist> parse(const fs::path& path,BlurayApi& api,const std::shared_ptr<IsoDisc>& image = {}) {
++ auto p=std::make_shared<MplsPlaylist>();p->image=image;p->path=path.wstring();p->name=path.filename().wstring();p->bdmv=path.parent_path().parent_path().wstring();
++ try {
++  auto n=image?image->size(path):int64_t(fs::file_size(path));if(n<40 || n>4*1024*1024)throw PlaylistError("invalid MPLS size",L"Недопустимый размер MPLS");
++  std::unique_ptr<IsoMetadata> metadata;
++  if(image)metadata=std::make_unique<IsoMetadata>(*image,path,4*1024*1024);
++  const auto& input=metadata?metadata->path:path;
++  std::unique_ptr<MPLS_PL,decltype(api.free)> raw(api.read(ConvertWideToUtf8(input.wstring()).c_str()),api.free);
++  if(!raw)throw PlaylistError("libbluray could not parse this MPLS",L"Не удалось прочитать MPLS через libbluray");
++  if(!raw->list_count || raw->list_count>4096 || !raw->play_item)throw PlaylistError("invalid PlayItem count",L"Недопустимое количество элементов плейлиста");
++  std::set<std::tuple<std::wstring,uint32_t,uint32_t>> ranges;
++  for(unsigned k=0;k<raw->list_count;k++) {
++   const auto& pi=raw->play_item[k];
++   if(!pi.clip || !pi.angle_count)throw PlaylistError("missing clip identifier",L"Отсутствует идентификатор клипа");
++   auto clip=std::string(pi.clip[0].clip_id,5);
++   if(clip.find_first_not_of("0123456789")!=std::string::npos || strcmp(pi.clip[0].codec_id,"M2TS"))throw PlaylistError("unsupported clip identifier",L"Неподдерживаемый идентификатор клипа");
++   MplsItem i;i.clip.assign(clip.begin(),clip.end());i.in45=pi.in_time;i.out45=pi.out_time;
++   if(i.out45<=i.in45) throw PlaylistError("invalid IN/OUT range",L"Некорректные границы клипа");
++   i.stc=pi.clip[0].stc_id;i.still=pi.still_mode;i.angle=pi.angle_count;
++   if(!pi.stn.num_video || !pi.stn.video)throw PlaylistError("playlist has no primary video",L"В плейлисте нет основного видео");
++   const auto& v=pi.stn.video[0];i.codec=v.coding_type;i.format=v.format;i.rate=v.rate;i.pid=v.stream_type==1?v.pid:-1;
++   for(unsigned j=0;j<pi.stn.num_audio;j++) {
++    const auto& a=pi.stn.audio[j];i.audioPids.push_back(a.stream_type==1?a.pid:-1);
++    if(!i.languages.empty())i.languages+=L", ";i.languages.append(a.lang,a.lang+3);
++   }
++   if(!ranges.emplace(i.clip,i.in45,i.out45).second) p->repeated++;
++   p->duration45+=int64_t(i.out45)-i.in45;p->items.push_back(std::move(i));
++  }
++  static const int nums[]={0,24000,24,25,30000,0,50,60000};
++  static const int dens[]={1,1001,1,1,1001,1,1,1001};
++  int r=p->items[0].rate;if(r<1 || r>7 || !nums[r])throw PlaylistError("unsupported frame rate",L"Неподдерживаемая частота кадров");
++  p->fpsNum=nums[r];p->fpsDen=dens[r];
++  int64_t elapsed=0;
++  for(auto& i:p->items) {
++   if(i.rate!=r || i.format!=p->items[0].format || i.codec!=p->items[0].codec)throw PlaylistError("mixed video formats are unsupported",L"В плейлисте несколько форматов видео");
++   if((i.codec!=0x1b && i.codec!=0x24) || (i.format!=6 && i.format!=8) || i.stc!=0 || i.pid<0)throw PlaylistError("this build supports progressive AVC/HEVC, primary STC only",L"Поддерживается прогрессивное AVC/HEVC с основной временной базой STC");
++   i.first=av_rescale_q(elapsed,AVRational{1,45000},AVRational{p->fpsDen,p->fpsNum});
++   elapsed+=int64_t(i.out45)-i.in45;
++   int64_t boundary=av_rescale_q(elapsed,AVRational{1,45000},AVRational{p->fpsDen,p->fpsNum});
++   i.count=boundary-i.first;if(i.count<1)throw PlaylistError("empty frame range",L"Пустой диапазон кадров");p->frames=boundary;
++  }
++ } catch(const PlaylistError& e) {p->error=e.display();}
++ catch(const std::exception& e) {std::string s=e.what();p->error.assign(s.begin(),s.end());}
++ return p;
++}
++struct Picker {std::vector<std::shared_ptr<MplsPlaylist>> rows;std::wstring current;int chosen=-1;};
++void details(HWND h,Picker* d) {
++ int n=ListView_GetNextItem(GetDlgItem(h,2201),-1,LVNI_SELECTED);
++ SetDlgItemTextW(h,2202,n>=0?d->rows[n]->description().c_str():L"");
++ EnableWindow(GetDlgItem(h,IDOK),n>=0&&d->rows[n]->error.empty());
++}
++INT_PTR CALLBACK pickProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
++ auto d=(Picker*)GetWindowLongPtrW(h,DWLP_USER);
++ if(msg==WM_INITDIALOG) {
++  d=(Picker*)l;SetWindowLongPtrW(h,DWLP_USER,l);auto list=GetDlgItem(h,2201);
++  ListView_SetExtendedListViewStyle(list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);
++  const bool ru=russianUi();
++  if(ru) {
++   SetWindowTextW(h,L"Выбор плейлиста Blu-ray");
++   SetDlgItemTextW(h,2203,L"Сравните длительность и порядок клипов. Повторы могут обозначать меню или зацикленный фрагмент.");
++   SetDlgItemTextW(h,2204,L"Откройте .mpls для одного плейлиста или ISO для выбора из списка.");
++   SetDlgItemTextW(h,IDOK,L"Открыть");
++   SetDlgItemTextW(h,IDCANCEL,L"Отмена");
++  }
++  const wchar_t* enTitles[]={L"Playlist",L"Duration",L"Parts",L"Clips (M2TS)",L"Video",L"Notes"};
++  const wchar_t* ruTitles[]={L"Плейлист",L"Длительность",L"Части",L"Клипы (M2TS)",L"Видео",L"Примечания"};
++  const auto titles=ru?ruTitles:enTitles;
++  int widths[]={90,112,45,180,165,215};
++  for(int c=0;c<6;c++){LVCOLUMNW col{};col.mask=LVCF_TEXT|LVCF_WIDTH;col.pszText=(wchar_t*)titles[c];col.cx=widths[c];ListView_InsertColumn(list,c,&col);}
++  int suggested=-1;
++  for(int k=0;k<(int)d->rows.size();k++) {
++   const auto& p=*d->rows[k];
++   if(suggested<0 && !p.repeated && p.error.empty())suggested=k;
++   std::wstring note=p.error.empty()?(p.repeated?(ru?std::format(L"Повторов: {}",p.repeated):std::format(L"{} repeated ranges",p.repeated)):L""):(ru?L"Не поддерживается":L"Unsupported");
++   if(k==suggested) note=ru?L"Самый длинный без повторов":L"Longest without repeats";
++   std::wstring clips;for(size_t j=0;j<std::min<size_t>(3,p.items.size());j++){if(j)clips+=L", ";clips+=p.items[j].clip;}if(p.items.size()>3)clips+=L", ...";
++   std::wstring fields[]={p.name,duration(p.duration45),std::to_wstring(p.items.size()),clips,videoText(p),note};
++   LVITEMW it{};it.mask=LVIF_TEXT;it.iItem=k;it.pszText=fields[0].data();ListView_InsertItem(list,&it);
++   for(int c=1;c<6;c++)ListView_SetItemText(list,k,c,fields[c].data());
++  }
++  if(!d->current.empty()) {
++   for(size_t k=0;k<d->rows.size();++k)if(!_wcsicmp(d->rows[k]->path.c_str(),d->current.c_str())){suggested=int(k);break;}
++  }
++  if(suggested<0 && !d->rows.empty())suggested=0;
++  if(suggested>=0){ListView_SetItemState(list,suggested,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);ListView_EnsureVisible(list,suggested,FALSE);}
++  details(h,d);SetFocus(list);return FALSE;
++ }
++ if(!d)return FALSE;
++ if(msg==WM_NOTIFY) {
++  auto n=(NMHDR*)l;if(n->idFrom==2201){if(n->code==LVN_ITEMCHANGED)details(h,d);if(n->code==NM_DBLCLK)SendMessageW(h,WM_COMMAND,IDOK,0);}return FALSE;
++ }
++ if(msg==WM_COMMAND && LOWORD(w)==IDOK) {
++  int n=ListView_GetNextItem(GetDlgItem(h,2201),-1,LVNI_SELECTED);if(n>=0&&d->rows[n]->error.empty()){d->chosen=n;EndDialog(h,IDOK);}return TRUE;
++ }
++ if((msg==WM_COMMAND&&LOWORD(w)==IDCANCEL)||msg==WM_CLOSE){EndDialog(h,IDCANCEL);return TRUE;}return FALSE;
++}
++int streamPid(AVFormatContext* f,int pid,AVMediaType type) {
++ for(unsigned k=0;k<f->nb_streams;k++) if(f->streams[k]->id==pid && f->streams[k]->codecpar->codec_type==type)return int(k);
++ return -1;
++}
++class MplsVideo final:public VDFFVideoSource {
++ const VDXInputDriverContext& ctx;
++ std::shared_ptr<MplsPlaylist> pl;
++ struct Slot {VDFFInputFile* file=nullptr;std::wstring clip;int pid=-1;uint64_t age=0;};
++ std::array<Slot,2> slots{};uint64_t clock=0;
++ VDFFVideoSource* active=nullptr;int64_t local=-1,last=-1,desired=-1;int required=0;
++ int target=0;bool dib=false;uint32 mode=kStreamModeUncompress;
++ VDXVideoSourceInfo vi{};VDXPixmap empty{};FilterModPixmapInfo pi{};
++ AVPixelFormat pixelFormat=AV_PIX_FMT_NONE;
++ bool select(int64_t n) {
++  if(n<0 || n>=pl->frames)return false;
++  auto it=std::upper_bound(pl->items.begin(),pl->items.end(),n,[](int64_t a,const MplsItem& b){return a<b.first;});--it;
++  Slot* slot=nullptr;for(auto& s:slots)if(s.file&&s.age&&s.clip==it->clip&&s.pid==it->pid)slot=&s;
++  if(!slot) {
++   slot=&*std::min_element(slots.begin(),slots.end(),[](auto&a,auto&b){return a.age<b.age;});
++   if(slot->file){if(active==slot->file->video_source)active=nullptr;slot->file->Release();*slot={};}
++   auto f=new VDFFInputFile(ctx);f->AddRef();slot->file=f;slot->clip=it->clip;slot->pid=it->pid;
++   for(const auto& i:pl->items)if(i.clip==it->clip)f->mpls_out45=std::max(f->mpls_out45,i.out45);
++   f->image=pl->image;
++   f->mpls_cache_bytes=256ull*1024*1024;
++   auto path=(fs::path(pl->bdmv)/L"STREAM"/(it->clip+L".m2ts")).wstring();f->Init(path.c_str(),nullptr);
++   if(!f->m_pFormatCtx)return false;
++   int idx=streamPid(f->m_pFormatCtx,it->pid,AVMEDIA_TYPE_VIDEO);
++   if(idx<0){ctx.mpCallbacks->SetError("MPLS: primary video PID is missing.");return false;}
++   f->mpls_seek_points=ReadMplsClpi(pl->bdmv,*it,pl->image);
++   auto v=new VDFFVideoSource(ctx);v->AddRef();f->video_source=v;
++   if(v->initStream(f,idx)<0)return false;
++   VDXVideoSourceInfo actual{};v->GetVideoSourceInfo(actual);
++   const auto& rate=v->m_streamInfo.mInfo.mSampleRate;
++   if(int64_t(rate.mNumerator)*pl->fpsDen!=int64_t(pl->fpsNum)*rate.mDenominator ||
++    (vi.mWidth&&(vi.mWidth!=actual.mWidth||vi.mHeight!=actual.mHeight||pixelFormat!=v->m_pCodecCtx->pix_fmt)) ||
++    v->m_pCodecCtx->field_order>AV_FIELD_PROGRESSIVE ||
++    v->m_pCodecCtx->codec_id!=(it->codec==0x24?AV_CODEC_ID_HEVC:AV_CODEC_ID_H264)) {
++    ctx.mpCallbacks->SetError("MPLS: actual clip format differs from playlist.");return false;
++   }
++   if(!vi.mWidth) {vi=actual;pixelFormat=v->m_pCodecCtx->pix_fmt;m_streamInfo=v->m_streamInfo;m_streamInfo.mInfo.mSampleCount=pl->frames;}
++   v->ApplyStreamMode(mode);if(!v->SetTargetFormat(target,dib))return false;
++  }
++  slot->age=++clock;active=slot->file->video_source;
++  if(!active)return false;
++  int64_t inpts=av_rescale_q(it->in45,AVRational{1,45000},active->m_pStream->time_base);
++  int64_t offset=av_rescale_q(inpts-active->m_start_time,active->m_pStream->time_base,AVRational{pl->fpsDen,pl->fpsNum});
++  local=offset+n-it->first;
++  if(local<0 || local>=active->m_sample_count){ctx.mpCallbacks->SetError("MPLS: requested frame is outside the clip.");return false;}
++  return true;
++ }
++public:
++ MplsVideo(const VDXInputDriverContext& c,std::shared_ptr<MplsPlaylist> p):VDFFVideoSource(c),ctx(c),pl(std::move(p)){}
++ ~MplsVideo(){for(auto& s:slots)if(s.file)s.file->Release();}
++ bool init(){return select(0);}
++ void VDXAPIENTRY GetVideoSourceInfo(VDXVideoSourceInfo& i)override{i=vi;}
++ bool VDXAPIENTRY Read(sint64 n,uint32 count,void* b,uint32 size,uint32* bytes,uint32* samples)override {
++  *bytes=0;*samples=0;if(!count||n==pl->frames)return true;if(b&&!size)return false;if(!select(n))return false;
++  bool ok=active->Read(local,1,b,size,bytes,samples);if(ok&&b)required=0;return ok;
++ }
++ const void* VDXAPIENTRY DecodeFrame(const void* b,uint32 size,bool pre,sint64 sample,sint64 frame)override {
++  if(!select(frame))return nullptr;auto result=active->DecodeFrame(b,size,pre,local,local);if(result)last=frame;return result;
++ }
++ const VDXPixmap& VDXAPIENTRY GetFrameBuffer()override{return active?active->GetFrameBuffer():empty;}
++ const FilterModPixmapInfo& VDXAPIENTRY GetFrameBufferInfo()override {if(active)pi=active->GetFrameBufferInfo();pi.frame_num=last;return pi;}
++ const void* VDXAPIENTRY GetFrameBufferBase()override{return active?active->GetFrameBufferBase():nullptr;}
++ bool VDXAPIENTRY IsFrameBufferValid()override{return last>=0&&active&&active->IsFrameBufferValid();}
++ bool VDXAPIENTRY SetTargetFormat(int f,bool d)override {target=f;dib=d;for(auto& s:slots)if(s.file&&s.file->video_source&&!s.file->video_source->SetTargetFormat(f,d))return false;last=-1;return true;}
++ bool VDXAPIENTRY SetDecompressedFormat(const VDXBITMAPINFOHEADER*)override{return false;}
++ void VDXAPIENTRY ApplyStreamMode(uint32 f)override{mode=(f&kStreamModePlayForward)|kStreamModeUncompress;for(auto&s:slots)if(s.file&&s.file->video_source)s.file->video_source->ApplyStreamMode(mode);}
++ bool VDXAPIENTRY QueryStreamMode(uint32 f)override{return !(f&kStreamModeDirectCopy);}
++ const void* VDXAPIENTRY GetDirectFormat()override{return nullptr;}
++ int VDXAPIENTRY GetDirectFormatLen()override{return 0;}
++ void VDXAPIENTRY GetSampleInfo(sint64,VDXVideoFrameInfo& i)override{i.mBytePosition=-1;i.mFrameType=kVDXVFT_Independent;i.mTypeChar='K';}
++ bool VDXAPIENTRY IsKey(sint64 n)override{return n>=0&&n<pl->frames;}
++ bool VDXAPIENTRY IsDecodable(sint64 n)override{return n>=0&&n<pl->frames;}
++ void VDXAPIENTRY SetDesiredFrame(sint64 n)override{desired=n;required=1;}
++ sint64 VDXAPIENTRY GetNextRequiredSample(bool& pre)override{pre=false;return required?desired:-1;}
++ int VDXAPIENTRY GetRequiredCount()override{return required;}
++ void VDXAPIENTRY Reset()override{required=0;last=-1;}
++};
++class MplsAudio final:public VDFFAudioSource {
++ const VDXInputDriverContext& ctx;std::shared_ptr<MplsPlaylist> pl;int index;
++ VDFFInputFile* file=nullptr;VDFFAudioSource* audio=nullptr;int current=-1;
++ std::vector<int64_t> bounds;std::vector<unsigned char> target;WAVEFORMATEXTENSIBLE format{};
++ bool select(int k) {
++  if(current==k&&audio)return true;
++  if(file){file->Release();file=nullptr;audio=nullptr;}current=-1;
++  const auto&i=pl->items[k];if(index>=int(i.audioPids.size())){ctx.mpCallbacks->SetError("MPLS: audio track is absent from a clip.");return false;}
++  file=new VDFFInputFile(ctx);file->AddRef();file->image=pl->image;
++  auto path=(fs::path(pl->bdmv)/L"STREAM"/(i.clip+L".m2ts")).wstring();file->Init(path.c_str(),nullptr);
++  if(!file->m_pFormatCtx)return false;
++  int ai=streamPid(file->m_pFormatCtx,i.audioPids[index],AVMEDIA_TYPE_AUDIO);
++  int vi=streamPid(file->m_pFormatCtx,i.pid,AVMEDIA_TYPE_VIDEO);
++  if(ai<0||vi<0){ctx.mpCallbacks->SetError("MPLS: audio/video PID is missing.");return false;}
++  file->video_start_time=av_rescale_q(i.in45,AVRational{1,45000},file->m_pFormatCtx->streams[vi]->time_base);
++  file->mpls_out45=i.out45;
++  audio=new VDFFAudioSource(ctx);audio->AddRef();file->audio_source=audio;
++  if(audio->initStream(file,ai)<0)return false;
++  audio->SetTargetFormat(target.empty()?nullptr:(const VDXWAVEFORMATEX*)target.data());
++  WAVEFORMATEXTENSIBLE actual{};memcpy(&actual,audio->GetDirectFormat(),sizeof(actual));
++  if(format.Format.nSamplesPerSec&&memcmp(&format,&actual,sizeof(actual))){ctx.mpCallbacks->SetError("MPLS: audio formats differ between clips.");return false;}
++  format=actual;current=k;return true;
++ }
++public:
++ MplsAudio(const VDXInputDriverContext& c,std::shared_ptr<MplsPlaylist> p,int n):VDFFAudioSource(c),ctx(c),pl(std::move(p)),index(n){}
++ ~MplsAudio(){if(file)file->Release();}
++ bool init(){
++  if(!select(0))return false;int64_t ticks=0;bounds.push_back(0);
++  for(const auto&i:pl->items){ticks+=int64_t(i.out45)-i.in45;bounds.push_back(av_rescale_q(ticks,AVRational{1,45000},AVRational{1,int(format.Format.nSamplesPerSec)}));}
++  audio->GetStreamSourceInfo(m_streamInfo);m_streamInfo.mSampleCount=bounds.back();return true;
++ }
++ const void* VDXAPIENTRY GetDirectFormat()override{return &format;}
++ int VDXAPIENTRY GetDirectFormatLen()override{return sizeof(format);}
++ void VDXAPIENTRY SetTargetFormat(const VDXWAVEFORMATEX* f)override {
++  target.clear();if(f){auto w=(const WAVEFORMATEX*)f;size_t n=sizeof(WAVEFORMATEX)+w->cbSize;if(n>4096)return;target.assign((const unsigned char*)f,(const unsigned char*)f+n);}
++  if(audio){audio->SetTargetFormat(f);memcpy(&format,audio->GetDirectFormat(),sizeof(format));}
++ }
++ bool VDXAPIENTRY Read(int64_t n,uint32_t count,void* b,uint32_t size,uint32_t* bytes,uint32_t* samples)override {
++  *bytes=0;*samples=0;if(n<0)return false;if(n>=bounds.back()||!count)return true;
++  count=(uint32_t)std::min<int64_t>(count,bounds.back()-n);
++  count=std::min(count,UINT_MAX/format.Format.nBlockAlign);
++  if(!b){*bytes=count*format.Format.nBlockAlign;*samples=count;return true;}
++  count=std::min(count,size/format.Format.nBlockAlign);
++  while(count){int k=int(std::upper_bound(bounds.begin(),bounds.end(),n)-bounds.begin())-1;if(!select(k))return false;
++   uint32_t want=(uint32_t)std::min<int64_t>(count,bounds[k+1]-n),nb=0,ns=0;
++   if(!audio->Read(n-bounds[k],want,(char*)b+*bytes,size-*bytes,&nb,&ns)||!ns)return false;
++   n+=ns;count-=ns;*bytes+=nb;*samples+=ns;
++  }return true;
++ }
++};
++}
++bool IsMplsPath(const wchar_t* path) {
++ auto e=fs::path(path).extension().wstring();return !_wcsicmp(e.c_str(),L".mpls")||!_wcsicmp(e.c_str(),L".bdmv")||!_wcsicmp(e.c_str(),L".iso");
++}
++std::vector<MplsSeekPoint> ReadMplsClpi(const std::wstring& bdmv,const MplsItem& item,const std::shared_ptr<IsoDisc>& image) {
++ // CLPI is optional acceleration, never the source of decoded frame numbers.
++ // Decode the on-disc CPI table through the same pinned libbluray metadata API.
++ try {
++  const auto path=fs::path(bdmv)/L"CLIPINF"/(item.clip+L".clpi");
++  if(!image&&!fs::is_regular_file(path))return {};
++  const auto size=image?image->size(path):int64_t(fs::file_size(path));
++  if(size<40||size>16*1024*1024)return {};
++  BlurayApi api;if(!api.readClpi||!api.freeClpi)return {};
++  std::unique_ptr<IsoMetadata> metadata;
++  if(image)metadata=std::make_unique<IsoMetadata>(*image,path,16*1024*1024);
++  const auto& input=metadata?metadata->path:path;
++  std::unique_ptr<CLPI_CL,decltype(api.freeClpi)> cl(api.readClpi(ConvertWideToUtf8(input.wstring()).c_str()),api.freeClpi);
++  if(!cl||!cl->clip.num_source_packets)return {};
++  // A remuxed/truncated M2TS must not use the original disc's packet offsets.
++  auto clipPath=fs::path(bdmv)/L"STREAM"/(item.clip+L".m2ts");
++  auto bytes=image?image->size(clipPath):int64_t(fs::file_size(clipPath));
++  if(bytes!=uint64_t(cl->clip.num_source_packets)*192)return {};
++  if(item.stc!=0||cl->sequence.num_atc_seq!=1||!cl->sequence.atc_seq)return {};
++  const auto& atc=cl->sequence.atc_seq[0];
++  if(atc.offset_stc_id!=0||atc.num_stc_seq!=1||!atc.stc_seq)return {};
++  const auto& stc=atc.stc_seq[0];
++  if(!cl->cpi.entry)return {};
++  const CLPI_EP_MAP_ENTRY* map=nullptr;
++  for(unsigned k=0;k<cl->cpi.num_stream_pid;k++)if(cl->cpi.entry[k].pid==item.pid)map=&cl->cpi.entry[k];
++  if(!map||!map->coarse||!map->fine||map->num_ep_fine<=0||map->num_ep_fine>500000||
++     map->num_ep_coarse<=0||map->num_ep_coarse>map->num_ep_fine||map->coarse[0].ref_ep_fine_id!=0)return {};
++  std::vector<MplsSeekPoint> points;points.reserve(map->num_ep_fine);
++  for(int k=0;k<map->num_ep_coarse;k++) {
++   const auto& coarse=map->coarse[k];int first=coarse.ref_ep_fine_id;
++   int end=k+1<map->num_ep_coarse?map->coarse[k+1].ref_ep_fine_id:map->num_ep_fine;
++   if(first<0||end<=first||end>map->num_ep_fine||coarse.pts_ep<0||coarse.pts_ep>0x3fff)return {};
++   for(int j=first;j<end;j++) {
++    const auto& fine=map->fine[j];
++    if(fine.pts_ep<0||fine.pts_ep>0x7ff||fine.spn_ep<0||fine.spn_ep>0x1ffff)return {};
++    uint64_t pts=(uint64_t(coarse.pts_ep&~1)<<18)+(uint64_t(fine.pts_ep)<<8);
++    uint64_t packet=uint64_t(coarse.spn_ep&~0x1ffffu)+fine.spn_ep;
++    if(pts>UINT32_MAX||packet>=cl->clip.num_source_packets)return {};
++    if(packet<stc.spn_stc_start)continue;
++    if(!points.empty()&&(pts<points.back().pts45||packet<=points.back().packet))return {};
++    points.push_back({uint32_t(pts),uint32_t(packet)});
++   }
++  }
++  if(GetEnvironmentVariableA("VD_CLPI_TRACE",nullptr,0))fprintf(stderr,"CLPI %ls: %zu entry points, %llu bytes metadata\n",item.clip.c_str(),points.size(),size);
++  return points;
++ }catch(const std::exception&){return {};}
++}
++std::wstring MplsPlaylist::description() const {
++ const bool ru=russianUi();
++ std::wostringstream s;s<<path<<(ru?L"\r\nДлительность: ":L"\r\nDuration: ")<<duration(duration45)<<(ru?L"   Кадров: ":L"   Frames: ")<<frames<<L"   "<<videoText(*this)<<L"\r\n";
++ if(!error.empty())s<<(ru?L"Не поддерживается: ":L"Unsupported: ")<<error<<L"\r\n";
++ s<<(ru?L"Языки аудио: ":L"Audio languages: ")<<(items.empty()?L"":items[0].languages)<<L"\r\n";
++ s<<(ru?L"Основное видео, ракурс 1. Команды меню и паузы пропускаются.\r\n":L"Primary video / angle 1. Menu commands and still pauses are not played.\r\n");
++ if(repeated)s<<(ru?L"Повторяющихся диапазонов: ":L"Repeated clip ranges: ")<<repeated<<(ru?L". Большая длительность может быть результатом зацикливания.\r\n":L". Long duration may be a loop, not a film.\r\n");
++ int n=0;for(const auto&i:items){s<<++n<<L". "<<i.clip<<L".m2ts   "<<duration(int64_t(i.out45)-i.in45)<<(ru?L"   кадры ":L"   frames ")<<i.first<<L".."<<i.first+i.count-1<<L"\r\n";}
++ return s.str();
++}
++namespace {
++std::shared_ptr<IsoDisc> openImage(const wchar_t* path) {
++ try { return std::make_shared<IsoDisc>(path); }
++ catch(const std::exception&) { throw PlaylistError("Cannot read UDF disc image",L"Не удалось прочитать образ диска UDF"); }
++}
++std::shared_ptr<MplsPlaylist> ChooseMpls(HWND owner,const wchar_t* source,const wchar_t* current) {
++ BlurayApi api;
++ const fs::path path(source);
++ Picker d;
++ if(current)d.current=current;
++ if(!_wcsicmp(path.extension().c_str(),L".iso")) {
++  auto image=openImage(source);
++  for(const auto& member:image->playlists)d.rows.push_back(parse(member,api,image));
++ } else {
++  auto folder=path.parent_path();
++  if(_wcsicmp(path.extension().c_str(),L".mpls"))folder/=L"PLAYLIST";
++  for(const auto& entry:fs::directory_iterator(folder))
++   if(entry.is_regular_file()&&!_wcsicmp(entry.path().extension().c_str(),L".mpls"))d.rows.push_back(parse(entry.path(),api));
++ }
++ if(d.rows.empty())throw PlaylistError("no MPLS files in BDMV/PLAYLIST",L"В BDMV/PLAYLIST нет файлов MPLS");
++ std::sort(d.rows.begin(),d.rows.end(),[](auto&a,auto&b){return a->duration45!=b->duration45?a->duration45>b->duration45:a->path<b->path;});
++ INITCOMMONCONTROLSEX cc{sizeof(cc),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&cc);
++ auto result=DialogBoxParamW(hInstance,MAKEINTRESOURCEW(2200),owner,pickProc,(LPARAM)&d);
++ if(result==-1)throw PlaylistError("Cannot open playlist chooser",L"Не удалось открыть список плейлистов");
++ return result==IDOK&&d.chosen>=0?d.rows[d.chosen]:nullptr;
++}
++}
++static void ValidatePlaylist(const MplsPlaylist& playlist) {
++    if (!playlist.error.empty()) throw std::runtime_error(ConvertWideToUtf8(playlist.error));
++    std::set<std::wstring> checked;
++    for (const auto& item : playlist.items) {
++        if (!checked.insert(item.clip).second) continue;
++        auto clip = fs::path(playlist.bdmv) / L"STREAM" / (item.clip + L".m2ts");
++        if (playlist.image ? playlist.image->size(clip) < 0 : !fs::is_regular_file(clip))
++            throw PlaylistError("referenced M2TS is missing", L"Отсутствует файл M2TS, указанный в плейлисте");
++    }
++}
++
++// Select before committing the new source so Cancel leaves the loaded video in place.
++static int PickInputPlaylist(HWND owner, const wchar_t* source, wchar_t* selected, uint32_t chars,
++    void* options, uint32_t capacity) {
++    try {
++        if (!source || !selected || !chars) return -2;
++        std::wstring previous;
++        if (options) {
++            if (capacity < sizeof(VDFFInputFileOptions::Data)) return -2;
++            auto current = std::make_unique<VDInputMetadataV1>();
++            if (!VDReadInputMetadata(source, current.get(), sizeof(*current)) ||
++                _wcsicmp(std::filesystem::path(current->resolved_path).extension().c_str(), L".mpls")) return -2;
++            previous = current->resolved_path;
++        }
++        auto chosen = ChooseMpls(owner, source, previous.empty() ? nullptr : previous.c_str());
++        if (!chosen || !_wcsicmp(chosen->path.c_str(), previous.c_str())) return -1;
++        if (!chosen->image) {
++            if (!options) ValidatePlaylist(*chosen);
++            if (chosen->path.size() >= chars) throw PlaylistError("Playlist path is too long", L"Слишком длинный путь к плейлисту");
++            wcscpy_s(selected, chars, chosen->path.c_str());
++            return 0;
++        }
++        if (!options) return -2;
++        VDFFInputFileOptions::Data data;
++        data.disable_cache = config_disable_cache;
++        data.iso_playlist = std::stoi(chosen->name);
++        memcpy(options, &data, sizeof(data));
++        return sizeof(data);
++    } catch (const PlaylistError& error) {
++        MessageBoxW(owner, error.display().c_str(), L"Blu-ray", MB_ICONERROR | MB_OK);
++        return -2;
++    } catch (const std::exception& error) {
++        MessageBoxW(owner, ConvertUtf8ToWide(error.what()).c_str(), L"Blu-ray", MB_ICONERROR | MB_OK);
++        return -2;
++    }
++}
++
++extern "C" __declspec(dllexport) int __cdecl VDChooseInputPlaylistW(
++    HWND owner, wchar_t* source, uint32_t chars, void* options, uint32_t capacity) {
++    if (!options) return -2;
++    return PickInputPlaylist(owner, source, source, chars, options, capacity);
++}
++
++extern "C" __declspec(dllexport) int __cdecl VDChooseFolderPlaylistW(
++    HWND owner, const wchar_t* index, wchar_t* selected, uint32_t chars) {
++    return PickInputPlaylist(owner, index, selected, chars, nullptr, 0);
++}
++
++std::shared_ptr<MplsPlaylist> OpenMpls(const wchar_t* path,const VDXInputDriverContext& ctx,int isoPlaylist) {
++ std::shared_ptr<MplsPlaylist> p;
++ try {
++  const fs::path source(path);
++  if(!_wcsicmp(source.extension().c_str(),L".mpls")) {
++   BlurayApi api;
++   p=parse(source,api);
++  } else if(isoPlaylist>=0 && !_wcsicmp(source.extension().c_str(),L".iso")) {
++   BlurayApi api;
++   auto image=openImage(path);
++   p=parse(source/L"BDMV"/L"PLAYLIST"/std::format(L"{:05}.mpls",isoPlaylist),api,image);
++  } else {
++   p=ChooseMpls(GetActiveWindow(),path,nullptr);
++   if(!p){ctx.mpCallbacks->SetError("%ls",russianUi()?L"Выбор плейлиста отменён.":L"MPLS selection cancelled.");return nullptr;}
++  }
++  ValidatePlaylist(*p);
++  return p;
++ }catch(const PlaylistError& e){ctx.mpCallbacks->SetError("MPLS: %ls",e.display().c_str());return nullptr;}
++ catch(const std::exception&e){ctx.mpCallbacks->SetError("MPLS: %s",e.what());return nullptr;}
++}
++VDFFVideoSource* CreateMplsVideo(const VDXInputDriverContext& c,std::shared_ptr<MplsPlaylist> p) {
++ auto v=new MplsVideo(c,std::move(p));if(!v->init()){delete v;return nullptr;}return v;
++}
++VDFFAudioSource* CreateMplsAudio(const VDXInputDriverContext& c,std::shared_ptr<MplsPlaylist> p,int n) {
++ if(n<0||n>=int(p->items[0].audioPids.size()))return nullptr;
++ auto a=new MplsAudio(c,std::move(p),n);if(!a->init()){delete a;return nullptr;}return a;
++}
+diff --git a/src/Mpls.h b/src/Mpls.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..73b68fbe063b8541672b2f1c9ca0ac7b8ccf7437
+--- /dev/null
++++ b/src/Mpls.h
+@@ -0,0 +1,37 @@
++// Local Blu-ray playlist input. Metadata only at open; no generated full index.
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <memory>
++#include <vector>
++#include <string>
++#include <cstdint>
++struct VDXInputDriverContext;
++class VDFFInputFile;
++class IsoDisc;
++class VDFFVideoSource;
++class VDFFAudioSource;
++struct MplsSeekPoint {
++ uint32_t pts45=0, packet=0;
++};
++struct MplsItem {
++ std::wstring clip;
++ uint32_t in45=0, out45=0;
++ int codec=0, format=0, rate=0, pid=0;
++ int angle=1, stc=0, still=0;
++ std::vector<int> audioPids;
++ std::wstring languages;
++ int64_t first=0, count=0;
++};
++struct MplsPlaylist {
++ std::wstring path, bdmv, name, error;
++ std::shared_ptr<IsoDisc> image;
++ std::vector<MplsItem> items;
++ int64_t duration45=0, frames=0;
++ int fpsNum=0, fpsDen=1, repeated=0;
++ std::wstring description() const;
++};
++bool IsMplsPath(const wchar_t* path);
++std::shared_ptr<MplsPlaylist> OpenMpls(const wchar_t* path, const VDXInputDriverContext& ctx, int isoPlaylist = -1);
++VDFFVideoSource* CreateMplsVideo(const VDXInputDriverContext& ctx, std::shared_ptr<MplsPlaylist> pl);
++VDFFAudioSource* CreateMplsAudio(const VDXInputDriverContext& ctx, std::shared_ptr<MplsPlaylist> pl, int index);
++std::vector<MplsSeekPoint> ReadMplsClpi(const std::wstring& bdmv, const MplsItem& item, const std::shared_ptr<IsoDisc>& image = {});
+diff --git a/src/VideoSource2.cpp b/src/VideoSource2.cpp
+index d6fbb9701fd66f02720557467df03b386347b454..c45c0805d2f28a3e92ee5f917748084f8adbf257 100644
+--- a/src/VideoSource2.cpp
++++ b/src/VideoSource2.cpp
+@@ -175,6 +175,13 @@ int VDFFVideoSource::initStream(VDFFInputFile* pSource, const int streamIndex)
+ 
+ 	m_pFormatCtx = pSource->getContext();
+ 	m_pStream = m_pFormatCtx->streams[m_streamIndex];
++	// An MPLS primary PID can differ from av_find_best_stream (for example,
++	// a UHD disc with a Dolby Vision enhancement layer). OpenVideoFile may
++	// have discarded this stream; the explicitly selected source owns it now.
++	for (unsigned i = 0; i < m_pFormatCtx->nb_streams; ++i) {
++		m_pFormatCtx->streams[i]->discard = i == unsigned(m_streamIndex)
++			? AVDISCARD_DEFAULT : AVDISCARD_ALL;
++	}
+ 
+ 	has_vfr = false;
+ 	average_fr = false;
+@@ -213,7 +220,14 @@ int VDFFVideoSource::initStream(VDFFInputFile* pSource, const int streamIndex)
+ 	if (!m_pCodecCtx) {
+ 		return -1;
+ 	}
+-	m_pCodecCtx->flags2 = AV_CODEC_FLAG2_SHOW_ALL;
++	m_exact_ts = m_pFormatCtx->iformat == av_find_input_format("mpegts")
++		&& ((m_pStream->codecpar->codec_id == AV_CODEC_ID_H264
++			&& m_pStream->codecpar->field_order == AV_FIELD_PROGRESSIVE)
++			|| (m_pStream->codecpar->codec_id == AV_CODEC_ID_HEVC
++				&& m_pStream->codecpar->field_order <= AV_FIELD_PROGRESSIVE));
++	// SHOW_ALL exposes pictures whose references were lost by a transport-stream
++	// seek. They can look plausible (or grey) and then poison the frame cache.
++	m_pCodecCtx->flags2 = m_exact_ts ? 0 : AV_CODEC_FLAG2_SHOW_ALL;
+ 	if (m_pStream->codecpar->codec_id == AV_CODEC_ID_VVC) {
+ 		m_pCodecCtx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
+ 	}
+@@ -251,7 +265,9 @@ int VDFFVideoSource::initStream(VDFFInputFile* pSource, const int streamIndex)
+ 	else {
+ 		int nb_index_entries = avformat_index_get_entries_count(m_pStream);
+ 
+-		if (nb_index_entries < 2) {
++		// MPEG-TS has no container index to load by seeking to EOF. MPLS
++		// already supplies optional CLPI seek points; ordinary TS uses PTS.
++		if (nb_index_entries < 2 && m_pFormatCtx->iformat != av_find_input_format("mpegts")) {
+ 			// try to force loading index
+ 			// works for FLV and MKV
+ 			int64_t pos = m_pStream->duration;
+@@ -411,6 +427,13 @@ int VDFFVideoSource::initStream(VDFFInputFile* pSource, const int streamIndex)
+ 	last_frame  = 0;
+ 	used_frames = 0;
+ 	buffer_reserve = (keyframe_gap > 1) ? keyframe_gap * 2 : 1;
++	// MPLS has an authoritative OUT timestamp; TS duration probing may omit
++	// the last reordered pictures. Reserve their indices without scanning them.
++	if (pSource->mpls_out45 && m_pStream->start_time != AV_NOPTS_VALUE) {
++		const int64_t endpts = av_rescale_q(pSource->mpls_out45, AVRational{1,45000}, m_pStream->time_base);
++		const int64_t count = av_rescale_q(endpts - m_pStream->start_time, m_pStream->time_base, AVRational{r_fr.den,r_fr.num});
++		if (count > 0 && count < INT_MAX-4) m_sample_count = std::max(m_sample_count, int(count)+4);
++	}
+ 
+ 	if (buffer_reserve < pSource->cfg_frame_buffers) {
+ 		buffer_reserve = pSource->cfg_frame_buffers;
+@@ -463,6 +486,12 @@ int VDFFVideoSource::initStream(VDFFInputFile* pSource, const int streamIndex)
+ 	}
+ 
+ 	uint64_t mem_other = 0;
++	if (pSource->mpls_cache_bytes) max_virtual = std::min(max_virtual, pSource->mpls_cache_bytes);
++	if (pSource->mpls_cache_bytes && frame_size > 0) {
++		// Short TS files may have no sparse index and otherwise get one cache
++		// slot. Keep a useful neighbourhood, within this clip's memory budget.
++		buffer_reserve = std::max(buffer_reserve, int(std::min<uint64_t>(m_sample_count, max_virtual / frame_size)));
++	}
+ 	if (m_pSource->head_segment) {
+ 		VDFFInputFile* f1 = m_pSource->head_segment;
+ 		while (1) {
+@@ -1860,14 +1889,22 @@ int VDFFVideoSource::calc_seek(const int jump, int64_t& pos)
+ 		pos = int64_t(jump) * m_frame_ts.num / m_frame_ts.den + m_start_time;
+ 		int dst = jump;
+ 
+-		if (!(m_pFormatCtx->iformat->flags & AVFMT_SEEK_TO_PTS)) {
++		if (m_exact_ts && !m_copy_mode) {
++			// Decode a short local preroll; no scan or persistent index is needed.
++			const int seconds = m_pCodecCtx->codec_id == AV_CODEC_ID_HEVC ? 1 : 2;
++			const int preroll = std::max(1, int(av_rescale_q(seconds, AVRational{1, 1},
++				av_inv_q(m_pStream->r_frame_rate))));
++			dst = std::max(0, jump - preroll);
++			pos = dst ? int64_t(dst) * m_frame_ts.num / m_frame_ts.den + m_start_time : AV_SEEK_START;
++		}
++		else if (!(m_pFormatCtx->iformat->flags & AVFMT_SEEK_TO_PTS)) {
+ 			// because seeking works on DTS it needs some unknown offset to work
+ 			pos -= int64_t(8) * m_frame_ts.num / m_frame_ts.den; // better than nothing
+ 			dst -= 8;
+ 			if (pos < 0) pos = 0;
+ 			if (dst < 0) dst = 0;
+ 		}
+-		if (sparse_index) {
++		if (sparse_index && !(m_exact_ts && !m_copy_mode)) {
+ 			// when jumping to keys and we can guess key locations, use that
+ 			// works with 2017-04-07 08-53-48.flv
+ 			int64_t pos1;
+@@ -1946,6 +1983,32 @@ int VDFFVideoSource::calc_prefetch(const int jump)
+ 	return x;
+ }
+ 
++int VDFFVideoSource::find_clpi_point(const int target) const
++{
++	const auto& points = m_pSource->mpls_seek_points;
++	if (!m_exact_ts || m_copy_mode || points.empty()) return -1;
++	const int64_t pts = int64_t(target) * m_frame_ts.num / m_frame_ts.den + m_start_time;
++	const int64_t pts45 = av_rescale_q(pts, m_pStream->time_base, AVRational{1,45000});
++	auto it = std::upper_bound(points.begin(), points.end(), pts45,
++		[](int64_t t, const MplsSeekPoint& p) { return t < p.pts45; });
++	return it == points.begin() ? 0 : int(it - points.begin()) - 1;
++}
++
++bool VDFFVideoSource::seek_clpi_point(const int point, const int target)
++{
++	const auto& points = m_pSource->mpls_seek_points;
++	if (point < 0 || point >= int(points.size())) return false;
++	const int64_t offset = int64_t(points[point].packet) * 192;
++	avcodec_flush_buffers(m_pCodecCtx);
++	const int ret = av_seek_frame(m_pFormatCtx, -1, offset, AVSEEK_FLAG_BYTE);
++	if (GetEnvironmentVariableA("VD_CLPI_TRACE",nullptr,0))fprintf(stderr,"CLPI seek frame=%d point=%d pts45=%u byte=%lld result=%d\n",target,point,points[point].pts45,offset,ret);
++	if (ret < 0) return false;
++	m_wait_for_hevc_key = m_pCodecCtx->codec_id == AV_CODEC_ID_HEVC;
++	next_frame = -1;
++	last_seek_frame = target;
++	return true;
++}
++
+ bool VDFFVideoSource::Read(sint64 lStart, uint32 lCount, void* lpBuffer, uint32 cbBuffer, uint32* lBytesRead, uint32* lSamplesRead)
+ {
+ 	if (lStart >= m_sample_count) {
+@@ -2030,31 +2093,70 @@ bool VDFFVideoSource::Read(sint64 lStart, uint32 lCount, void* lpBuffer, uint32
+ 
+ 	int64_t seek_pos;
+ 	int seek_frame = calc_seek(jump, seek_pos);
++	int clpi_point = -1;
++	int clpi_retries = 0;
+ 	if (seek_frame != -1) {
+ 		if (jump < next_frame) {
+ 			enable_prefetch = true;
+ 		}
+ 
+-		avcodec_flush_buffers(m_pCodecCtx);
+-		// don't use AVSEEK_FLAG_BACKWARD for MP4
+-		// Comment from LAV Filters source code: "MP4 index timestamps are DTS, seeking expects PTS however..."
+-		::seek_frame(m_pFormatCtx, m_streamIndex, seek_pos, m_pSource->is_mp4 ? 0 : AVSEEK_FLAG_BACKWARD);
+-		if (trust_index || is_image_list) {
+-			next_frame = seek_frame;
+-		} else {
+-			next_frame = -1;
+-		}
++		clpi_point = find_clpi_point(jump);
++		// Exact PTS matching below is unchanged; CLPI only selects where to read.
++		if (clpi_point < 0 || !seek_clpi_point(clpi_point,jump)) {
++			clpi_point = -1;
++			avcodec_flush_buffers(m_pCodecCtx);
++			// MP4 index timestamps are DTS, but its seek interface expects PTS.
++			const int seek_result = ::seek_frame(m_pFormatCtx, m_streamIndex, seek_pos, m_pSource->is_mp4 ? 0 : AVSEEK_FLAG_BACKWARD);
++			if (m_exact_ts && !m_copy_mode && seek_result < 0) {
++				mContext.mpCallbacks->SetError("AVC/HEVC transport-stream seek failed: %s", AVError2Str(seek_result).c_str());
++				return false;
++			}
++			m_wait_for_hevc_key = m_exact_ts && !m_copy_mode && m_pCodecCtx->codec_id == AV_CODEC_ID_HEVC;
++			if (trust_index || is_image_list) {
++				next_frame = seek_frame;
++			} else {
++				next_frame = -1;
++			}
+ 
+-		// this helps to prevent seeking again to satisfy same request
+-		if (!trust_index) {
+-			last_seek_frame = jump;
+-		}
+-	}
++			// Avoid seeking again to satisfy the same request.
++			if (!trust_index) last_seek_frame = jump;
++		}
++	}
++
++	// If recovery starts after the requested picture, retry farther back rather
++	// than returning a neighbouring frame. Cap the preroll at eight seconds.
++	int retry_seconds = m_pCodecCtx->codec_id == AV_CODEC_ID_HEVC ? 2 : 4;
++	auto retry_exact_seek = [&]() {
++		// Quantized CPI times/open GOPs can require the preceding entry point.
++		// Retry a bounded number of nearby points before the timestamp fallback.
++		while (clpi_point > 0 && clpi_retries < 2) {
++			--clpi_point;++clpi_retries;
++			const int64_t pts45 = av_rescale_q(int64_t(lStart)*m_frame_ts.num/m_frame_ts.den+m_start_time,
++				m_pStream->time_base,AVRational{1,45000});
++			if (pts45 - m_pSource->mpls_seek_points[clpi_point].pts45 > 8*45000) break;
++			if (seek_clpi_point(clpi_point,int(lStart))) return true;
++		}
++		if (!m_exact_ts || m_copy_mode || retry_seconds > 8) return false;
++		const int preroll = std::max(1, int(av_rescale_q(retry_seconds, AVRational{1, 1},
++			av_inv_q(m_pStream->r_frame_rate))));
++		retry_seconds *= 2;
++		const int dst = std::max(0, int(lStart) - preroll);
++		const int64_t pos = dst ? int64_t(dst) * m_frame_ts.num / m_frame_ts.den + m_start_time : AV_SEEK_START;
++		avcodec_flush_buffers(m_pCodecCtx);
++		if (::seek_frame(m_pFormatCtx, m_streamIndex, pos, AVSEEK_FLAG_BACKWARD) < 0) return false;
++		m_wait_for_hevc_key = m_pCodecCtx->codec_id == AV_CODEC_ID_HEVC;
++		next_frame = -1;
++		last_seek_frame = int(lStart);
++		return true;
++	};
+ 
+ 	while (1) {
+ 		if (!read_frame(lStart)) {
++			// Draining the decoder at EOF may have produced the requested picture.
++			if (m_exact_ts && !m_copy_mode && frame_array[(size_t)lStart]) return true;
++			if (retry_exact_seek()) continue;
+ 			bool fail = true;
+-			if (next_frame > 0) {
++			if (next_frame > 0 && !(m_exact_ts && !m_copy_mode)) {
+ 				// end of stream, fill with dups
+ 				BufferPage* page = frame_array[next_frame - 1];
+ 				if (page) {
+@@ -2089,6 +2191,7 @@ bool VDFFVideoSource::Read(sint64 lStart, uint32 lCount, void* lpBuffer, uint32
+ 		//! missed seek or bad stream, just fail
+ 		// better idea is to build new corrected index maybe
+ 		if (next_frame > lStart) {
++			if (retry_exact_seek()) continue;
+ 			dead_range_start = lStart;
+ 			dead_range_end = next_frame - 2;
+ 			mContext.mpCallbacks->SetError("requested frame not found; next valid frame = %d", next_frame - 1);
+@@ -2138,7 +2241,10 @@ bool VDFFVideoSource::read_frame(const int64_t desired_frame, bool init)
+ 		if (ret < 0) {
+ 			// end of stream, grab buffered images
+ 			ret = avcodec_send_packet(m_pCodecCtx, nullptr);
+-			while (ret >= 0) {
++			// A second flush packet reports EOF even when delayed pictures are
++			// still available. Continue receiving those on the next frame request.
++			if (ret < 0 && ret != AVERROR_EOF && ret != AVERROR(EAGAIN)) return false;
++			while (true) {
+ 				ret = avcodec_receive_frame_flags(m_pCodecCtx, m_pFrame, AV_CODEC_RECEIVE_FRAME_FLAG_SYNCHRONOUS);
+ 				if (ret != 0) {
+ 					return false;
+@@ -2150,14 +2256,25 @@ bool VDFFVideoSource::read_frame(const int64_t desired_frame, bool init)
+ 				handle_frame();
+ 				av_frame_unref(m_pFrame);
+ 				done_frames++;
++				if (m_exact_ts && !m_copy_mode && desired_frame >= 0 && desired_frame < m_sample_count
++					&& frame_array[(size_t)desired_frame]) return true;
+ 			}
+ 			return (done_frames > 0);
+ 		}
+ 		else {
+ 			if (pkt->stream_index == m_streamIndex) {
++				// Pipeline the CLPI preroll across decoder frame threads. Once a packet
++				// reaches the desired PTS, request synchronous output to avoid waiting
++				// for unrelated future pictures. Frame identity still comes from PTS.
++				unsigned receive_flags = AV_CODEC_RECEIVE_FRAME_FLAG_SYNCHRONOUS;
++				if (!init && m_exact_ts && !m_copy_mode && !m_pSource->mpls_seek_points.empty()
++					&& pkt->pts != AV_NOPTS_VALUE) {
++					const int64_t target_pts = desired_frame*m_frame_ts.num/m_frame_ts.den+m_start_time;
++					if (pkt->pts < target_pts) receive_flags = 0;
++				}
+ 				ret = avcodec_send_packet(m_pCodecCtx, pkt.get());
+ 				while (ret >= 0) {
+-					ret = avcodec_receive_frame_flags(m_pCodecCtx, m_pFrame, AV_CODEC_RECEIVE_FRAME_FLAG_SYNCHRONOUS);
++					ret = avcodec_receive_frame_flags(m_pCodecCtx, m_pFrame, receive_flags);
+ 					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+ 						break;
+ 					} else if (ret < 0) {
+@@ -2241,7 +2358,17 @@ int VDFFVideoSource::handle_frame()
+ 		return -1;
+ 	}
+ 
+-	if (next_frame > 0 && pos > next_frame) {
++	if (m_exact_ts && !m_copy_mode &&
++		(m_pFrame->decode_error_flags || (m_pFrame->flags & AV_FRAME_FLAG_CORRUPT)
++			|| (m_wait_for_hevc_key && !(m_pFrame->flags & AV_FRAME_FLAG_KEY)))) {
++		next_frame = pos + 1;
++		return -1;
++	}
++	// HEVC can synthesize missing references after a mid-GOP seek. Only cache
++	// pictures after a clean random-access picture has reached display order.
++	m_wait_for_hevc_key = false;
++
++	if (next_frame > 0 && pos > next_frame && !(m_exact_ts && !m_copy_mode)) {
+ 		// gap between frames, fill with dups
+ 		// caused by non-constant framerate etc
+ 		BufferPage* page = frame_array[next_frame - 1];
+diff --git a/src/VideoSource2.h b/src/VideoSource2.h
+index 21858e367020900112e7becc28c807a883f67886..fb9d4d545be8fa588fcfceb2619f630275bc1688 100644
+--- a/src/VideoSource2.h
++++ b/src/VideoSource2.h
+@@ -181,6 +181,9 @@ private:
+ 	bool avi_drop_index     = false;
+ 
+ 	bool is_image_list      = false;
++	// AVC/HEVC transport streams need recovery before caching a seek.
++	bool m_exact_ts     = false;
++	bool m_wait_for_hevc_key = false;
+ 	bool m_copy_mode        = false;
+ 	bool m_decode_mode      = true;
+ 	bool m_small_cache_mode = false;
+@@ -222,4 +225,6 @@ private:
+ 	int  calc_sparse_key(const int64_t sample, int64_t& pos);
+ 	int  calc_seek(const int jump, int64_t& pos);
+ 	int  calc_prefetch(const int jump);
++	int  find_clpi_point(const int target) const;
++	bool seek_clpi_point(const int point, const int target);
+ };
+diff --git a/src/avlib.rc b/src/avlib.rc
+index d71fdb46df78be73bfeac98470bd3ed8c4c995ac..3b7319e8b4bd28d138f84b05016805ec2ce8759e 100644
+--- a/src/avlib.rc
++++ b/src/avlib.rc
+@@ -19,6 +19,19 @@
+ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+ #pragma code_page(1252)
+ 
++2200 DIALOGEX 0, 0, 570, 285
++STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
++CAPTION "Choose Blu-ray playlist"
++FONT 9, "Segoe UI"
++BEGIN
++ LTEXT "Select by duration and clip sequence. Repeated ranges can be menus/loops. No video indexing is performed.", 2203, 8, 8, 554, 20
++ CONTROL "", 2201, "SysListView32", WS_TABSTOP | WS_BORDER | 0x0001 | 0x0004 | 0x0008, 8, 30, 554, 143
++ EDITTEXT 2202, 8, 180, 554, 71, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL
++ LTEXT "Open an .mpls file for one playlist or an ISO to choose from the list.", 2204, 8, 263, 365, 12
++ DEFPUSHBUTTON "Open", IDOK, 450, 260, 54, 17
++ PUSHBUTTON "Cancel", IDCANCEL, 509, 260, 53, 17
++END
++
+ /////////////////////////////////////////////////////////////////////////////
+ //
+ // DESIGNINFO
+diff --git a/src/avlib.vcxproj b/src/avlib.vcxproj
+index 44c6b66d08a7daddf17203650ed523e574efdf9b..50a28c1f2249f15e92deed676d90b37d0ebd294e 100644
+--- a/src/avlib.vcxproj
++++ b/src/avlib.vcxproj
+@@ -235,6 +235,8 @@
+     <ClCompile Include="gopro.cpp" />
+     <ClCompile Include="Helper.cpp" />
+     <ClCompile Include="InputFile2.cpp" />
++    <ClCompile Include="Mpls.cpp" />
++    <ClCompile Include="IsoDisc.cpp" />
+     <ClCompile Include="main2.cpp" />
+     <ClCompile Include="mov_mp4.cpp" />
+     <ClCompile Include="pch\stdafx.cpp">
+@@ -279,4 +281,4 @@
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+   <ImportGroup Label="ExtensionTargets">
+   </ImportGroup>
+-</Project>
+\ No newline at end of file
++</Project>
+diff --git a/src/export.cpp b/src/export.cpp
+index 0f015754b6e4eee5b359be2fe04a5150988daa0a..07933e932033371ccd042b0e1c173040cecf270f 100644
+--- a/src/export.cpp
++++ b/src/export.cpp
+@@ -72,6 +72,7 @@ uint32_t export_avi_fcc(AVStream* src)
+ 
+ bool VDXAPIENTRY VDFFInputFile::GetExportMenuInfo(int id, char* name, int name_size, bool* enabled)
+ {
++	if (playlist) return false;
+ 	if (id == 0) {
+ 		strncpy_s(name, 256, "Stream copy...", name_size);
+ 		*enabled = !is_image && !is_image_list;
+@@ -266,6 +267,7 @@ void ProgressDialog::check()
+ 
+ bool VDXAPIENTRY VDFFInputFile::ExecuteExport(int id, VDXHWND parent, IProjectState* state)
+ {
++	if (playlist) return false;
+ 	if (id == 0) {
+ 		sint64 start;
+ 		sint64 end;
+diff --git a/src/main2.cpp b/src/main2.cpp
+index de00d56c3de7bebeff4610d230c190ea216f1a07..7557bbaff53ca7c55be87e76cb580ef00c81cbbf 100644
+--- a/src/main2.cpp
++++ b/src/main2.cpp
+@@ -110,7 +110,7 @@ bool VDXAPIENTRY ff_create(const VDXInputDriverContext* pContext, IVDXInputFileD
+ 	return true;
+ }
+ 
+-#define OPTION_VIDEO_INIT L"FFmpeg : video|*.mp4;*.mov;*.mkv;*.webm;*.flv;*.avi;*.nut;*.y4m"
++#define OPTION_VIDEO_INIT L"FFmpeg : video|*.mp4;*.mov;*.mkv;*.webm;*.flv;*.avi;*.nut;*.y4m;*.mpls;*.bdmv;*.iso"
+ std::wstring option_video = OPTION_VIDEO_INIT;
+ //std::wstring pattern_video; // example "*.mov|*.mp4|*.avi"
+ 
+@@ -124,7 +124,7 @@ VDXInputDriverDefinition ff_video = {
+ 	0, //Signature
+ 	0, //pattern_video.c_str(),
+ 	option_video.c_str(),
+-	L"Caching input driver",
++	L"Caching input driver (MPLS + CLPI v4)",
+ 	ff_create
+ };
+ 
+@@ -166,7 +166,7 @@ VDXPluginInfo ff_plugin_video = {
+ 	sizeof(VDXPluginInfo),
+ 	L"Caching input driver",
+ 	L"Anton Shekhovtsov",
+-	L"Loads and decode files through ffmpeg libs.",
++	L"FFmpeg input; MPLS/CLPI exact AVC/HEVC seeking, local build 2026-10-19.",
+ 	(1 << 24) + (9 << 16),
+ 	kVDXPluginType_Input,
+ 	0,
+diff --git a/src/third_party/libbluray/COPYING b/src/third_party/libbluray/COPYING
+new file mode 100644
+index 0000000000000000000000000000000000000000..20fb9c7da21cb5a29e10f614a03661a935181652
+--- /dev/null
++++ b/src/third_party/libbluray/COPYING
+@@ -0,0 +1,458 @@
++                  GNU LESSER GENERAL PUBLIC LICENSE
++                       Version 2.1, February 1999
++
++ Copyright (C) 1991, 1999 Free Software Foundation, Inc.
++ 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ Everyone is permitted to copy and distribute verbatim copies
++ of this license document, but changing it is not allowed.
++
++[This is the first released version of the Lesser GPL.  It also counts
++ as the successor of the GNU Library Public License, version 2, hence
++ the version number 2.1.]
++
++                            Preamble
++
++  The licenses for most software are designed to take away your
++freedom to share and change it.  By contrast, the GNU General Public
++Licenses are intended to guarantee your freedom to share and change
++free software--to make sure the software is free for all its users.
++
++  This license, the Lesser General Public License, applies to some
++specially designated software packages--typically libraries--of the
++Free Software Foundation and other authors who decide to use it.  You
++can use it too, but we suggest you first think carefully about whether
++this license or the ordinary General Public License is the better
++strategy to use in any particular case, based on the explanations below.
++
++  When we speak of free software, we are referring to freedom of use,
++not price.  Our General Public Licenses are designed to make sure that
++you have the freedom to distribute copies of free software (and charge
++for this service if you wish); that you receive source code or can get
++it if you want it; that you can change the software and use pieces of
++it in new free programs; and that you are informed that you can do
++these things.
++
++  To protect your rights, we need to make restrictions that forbid
++distributors to deny you these rights or to ask you to surrender these
++rights.  These restrictions translate to certain responsibilities for
++you if you distribute copies of the library or if you modify it.
++
++  For example, if you distribute copies of the library, whether gratis
++or for a fee, you must give the recipients all the rights that we gave
++you.  You must make sure that they, too, receive or can get the source
++code.  If you link other code with the library, you must provide
++complete object files to the recipients, so that they can relink them
++with the library after making changes to the library and recompiling
++it.  And you must show them these terms so they know their rights.
++
++  We protect your rights with a two-step method: (1) we copyright the
++library, and (2) we offer you this license, which gives you legal
++permission to copy, distribute and/or modify the library.
++
++  To protect each distributor, we want to make it very clear that
++there is no warranty for the free library.  Also, if the library is
++modified by someone else and passed on, the recipients should know
++that what they have is not the original version, so that the original
++author's reputation will not be affected by problems that might be
++introduced by others.
++
++  Finally, software patents pose a constant threat to the existence of
++any free program.  We wish to make sure that a company cannot
++effectively restrict the users of a free program by obtaining a
++restrictive license from a patent holder.  Therefore, we insist that
++any patent license obtained for a version of the library must be
++consistent with the full freedom of use specified in this license.
++
++  Most GNU software, including some libraries, is covered by the
++ordinary GNU General Public License.  This license, the GNU Lesser
++General Public License, applies to certain designated libraries, and
++is quite different from the ordinary General Public License.  We use
++this license for certain libraries in order to permit linking those
++libraries into non-free programs.
++
++  When a program is linked with a library, whether statically or using
++a shared library, the combination of the two is legally speaking a
++combined work, a derivative of the original library.  The ordinary
++General Public License therefore permits such linking only if the
++entire combination fits its criteria of freedom.  The Lesser General
++Public License permits more lax criteria for linking other code with
++the library.
++
++  We call this license the "Lesser" General Public License because it
++does Less to protect the user's freedom than the ordinary General
++Public License.  It also provides other free software developers Less
++of an advantage over competing non-free programs.  These disadvantages
++are the reason we use the ordinary General Public License for many
++libraries.  However, the Lesser license provides advantages in certain
++special circumstances.
++
++  For example, on rare occasions, there may be a special need to
++encourage the widest possible use of a certain library, so that it becomes
++a de-facto standard.  To achieve this, non-free programs must be
++allowed to use the library.  A more frequent case is that a free
++library does the same job as widely used non-free libraries.  In this
++case, there is little to gain by limiting the free library to free
++software only, so we use the Lesser General Public License.
++
++  In other cases, permission to use a particular library in non-free
++programs enables a greater number of people to use a large body of
++free software.  For example, permission to use the GNU C Library in
++non-free programs enables many more people to use the whole GNU
++operating system, as well as its variant, the GNU/Linux operating
++system.
++
++  Although the Lesser General Public License is Less protective of the
++users' freedom, it does ensure that the user of a program that is
++linked with the Library has the freedom and the wherewithal to run
++that program using a modified version of the Library.
++
++  The precise terms and conditions for copying, distribution and
++modification follow.  Pay close attention to the difference between a
++"work based on the library" and a "work that uses the library".  The
++former contains code derived from the library, whereas the latter must
++be combined with the library in order to run.
++
++                  GNU LESSER GENERAL PUBLIC LICENSE
++   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
++
++  0. This License Agreement applies to any software library or other
++program which contains a notice placed by the copyright holder or
++other authorized party saying it may be distributed under the terms of
++this Lesser General Public License (also called "this License").
++Each licensee is addressed as "you".
++
++  A "library" means a collection of software functions and/or data
++prepared so as to be conveniently linked with application programs
++(which use some of those functions and data) to form executables.
++
++  The "Library", below, refers to any such software library or work
++which has been distributed under these terms.  A "work based on the
++Library" means either the Library or any derivative work under
++copyright law: that is to say, a work containing the Library or a
++portion of it, either verbatim or with modifications and/or translated
++straightforwardly into another language.  (Hereinafter, translation is
++included without limitation in the term "modification".)
++
++  "Source code" for a work means the preferred form of the work for
++making modifications to it.  For a library, complete source code means
++all the source code for all modules it contains, plus any associated
++interface definition files, plus the scripts used to control compilation
++and installation of the library.
++
++  Activities other than copying, distribution and modification are not
++covered by this License; they are outside its scope.  The act of
++running a program using the Library is not restricted, and output from
++such a program is covered only if its contents constitute a work based
++on the Library (independent of the use of the Library in a tool for
++writing it).  Whether that is true depends on what the Library does
++and what the program that uses the Library does.
++
++  1. You may copy and distribute verbatim copies of the Library's
++complete source code as you receive it, in any medium, provided that
++you conspicuously and appropriately publish on each copy an
++appropriate copyright notice and disclaimer of warranty; keep intact
++all the notices that refer to this License and to the absence of any
++warranty; and distribute a copy of this License along with the
++Library.
++
++  You may charge a fee for the physical act of transferring a copy,
++and you may at your option offer warranty protection in exchange for a
++fee.
++
++  2. You may modify your copy or copies of the Library or any portion
++of it, thus forming a work based on the Library, and copy and
++distribute such modifications or work under the terms of Section 1
++above, provided that you also meet all of these conditions:
++
++    a) The modified work must itself be a software library.
++
++    b) You must cause the files modified to carry prominent notices
++    stating that you changed the files and the date of any change.
++
++    c) You must cause the whole of the work to be licensed at no
++    charge to all third parties under the terms of this License.
++
++    d) If a facility in the modified Library refers to a function or a
++    table of data to be supplied by an application program that uses
++    the facility, other than as an argument passed when the facility
++    is invoked, then you must make a good faith effort to ensure that,
++    in the event an application does not supply such function or
++    table, the facility still operates, and performs whatever part of
++    its purpose remains meaningful.
++
++    (For example, a function in a library to compute square roots has
++    a purpose that is entirely well-defined independent of the
++    application.  Therefore, Subsection 2d requires that any
++    application-supplied function or table used by this function must
++    be optional: if the application does not supply it, the square
++    root function must still compute square roots.)
++
++These requirements apply to the modified work as a whole.  If
++identifiable sections of that work are not derived from the Library,
++and can be reasonably considered independent and separate works in
++themselves, then this License, and its terms, do not apply to those
++sections when you distribute them as separate works.  But when you
++distribute the same sections as part of a whole which is a work based
++on the Library, the distribution of the whole must be on the terms of
++this License, whose permissions for other licensees extend to the
++entire whole, and thus to each and every part regardless of who wrote
++it.
++
++Thus, it is not the intent of this section to claim rights or contest
++your rights to work written entirely by you; rather, the intent is to
++exercise the right to control the distribution of derivative or
++collective works based on the Library.
++
++In addition, mere aggregation of another work not based on the Library
++with the Library (or with a work based on the Library) on a volume of
++a storage or distribution medium does not bring the other work under
++the scope of this License.
++
++  3. You may opt to apply the terms of the ordinary GNU General Public
++License instead of this License to a given copy of the Library.  To do
++this, you must alter all the notices that refer to this License, so
++that they refer to the ordinary GNU General Public License, version 2,
++instead of to this License.  (If a newer version than version 2 of the
++ordinary GNU General Public License has appeared, then you can specify
++that version instead if you wish.)  Do not make any other change in
++these notices.
++
++  Once this change is made in a given copy, it is irreversible for
++that copy, so the ordinary GNU General Public License applies to all
++subsequent copies and derivative works made from that copy.
++
++  This option is useful when you wish to copy part of the code of
++the Library into a program that is not a library.
++
++  4. You may copy and distribute the Library (or a portion or
++derivative of it, under Section 2) in object code or executable form
++under the terms of Sections 1 and 2 above provided that you accompany
++it with the complete corresponding machine-readable source code, which
++must be distributed under the terms of Sections 1 and 2 above on a
++medium customarily used for software interchange.
++
++  If distribution of object code is made by offering access to copy
++from a designated place, then offering equivalent access to copy the
++source code from the same place satisfies the requirement to
++distribute the source code, even though third parties are not
++compelled to copy the source along with the object code.
++
++  5. A program that contains no derivative of any portion of the
++Library, but is designed to work with the Library by being compiled or
++linked with it, is called a "work that uses the Library".  Such a
++work, in isolation, is not a derivative work of the Library, and
++therefore falls outside the scope of this License.
++
++  However, linking a "work that uses the Library" with the Library
++creates an executable that is a derivative of the Library (because it
++contains portions of the Library), rather than a "work that uses the
++library".  The executable is therefore covered by this License.
++Section 6 states terms for distribution of such executables.
++
++  When a "work that uses the Library" uses material from a header file
++that is part of the Library, the object code for the work may be a
++derivative work of the Library even though the source code is not.
++Whether this is true is especially significant if the work can be
++linked without the Library, or if the work is itself a library.  The
++threshold for this to be true is not precisely defined by law.
++
++  If such an object file uses only numerical parameters, data
++structure layouts and accessors, and small macros and small inline
++functions (ten lines or less in length), then the use of the object
++file is unrestricted, regardless of whether it is legally a derivative
++work.  (Executables containing this object code plus portions of the
++Library will still fall under Section 6.)
++
++  Otherwise, if the work is a derivative of the Library, you may
++distribute the object code for the work under the terms of Section 6.
++Any executables containing that work also fall under Section 6,
++whether or not they are linked directly with the Library itself.
++
++  6. As an exception to the Sections above, you may also combine or
++link a "work that uses the Library" with the Library to produce a
++work containing portions of the Library, and distribute that work
++under terms of your choice, provided that the terms permit
++modification of the work for the customer's own use and reverse
++engineering for debugging such modifications.
++
++  You must give prominent notice with each copy of the work that the
++Library is used in it and that the Library and its use are covered by
++this License.  You must supply a copy of this License.  If the work
++during execution displays copyright notices, you must include the
++copyright notice for the Library among them, as well as a reference
++directing the user to the copy of this License.  Also, you must do one
++of these things:
++
++    a) Accompany the work with the complete corresponding
++    machine-readable source code for the Library including whatever
++    changes were used in the work (which must be distributed under
++    Sections 1 and 2 above); and, if the work is an executable linked
++    with the Library, with the complete machine-readable "work that
++    uses the Library", as object code and/or source code, so that the
++    user can modify the Library and then relink to produce a modified
++    executable containing the modified Library.  (It is understood
++    that the user who changes the contents of definitions files in the
++    Library will not necessarily be able to recompile the application
++    to use the modified definitions.)
++
++    b) Use a suitable shared library mechanism for linking with the
++    Library.  A suitable mechanism is one that (1) uses at run time a
++    copy of the library already present on the user's computer system,
++    rather than copying library functions into the executable, and (2)
++    will operate properly with a modified version of the library, if
++    the user installs one, as long as the modified version is
++    interface-compatible with the version that the work was made with.
++
++    c) Accompany the work with a written offer, valid for at
++    least three years, to give the same user the materials
++    specified in Subsection 6a, above, for a charge no more
++    than the cost of performing this distribution.
++
++    d) If distribution of the work is made by offering access to copy
++    from a designated place, offer equivalent access to copy the above
++    specified materials from the same place.
++
++    e) Verify that the user has already received a copy of these
++    materials or that you have already sent this user a copy.
++
++  For an executable, the required form of the "work that uses the
++Library" must include any data and utility programs needed for
++reproducing the executable from it.  However, as a special exception,
++the materials to be distributed need not include anything that is
++normally distributed (in either source or binary form) with the major
++components (compiler, kernel, and so on) of the operating system on
++which the executable runs, unless that component itself accompanies
++the executable.
++
++  It may happen that this requirement contradicts the license
++restrictions of other proprietary libraries that do not normally
++accompany the operating system.  Such a contradiction means you cannot
++use both them and the Library together in an executable that you
++distribute.
++
++  7. You may place library facilities that are a work based on the
++Library side-by-side in a single library together with other library
++facilities not covered by this License, and distribute such a combined
++library, provided that the separate distribution of the work based on
++the Library and of the other library facilities is otherwise
++permitted, and provided that you do these two things:
++
++    a) Accompany the combined library with a copy of the same work
++    based on the Library, uncombined with any other library
++    facilities.  This must be distributed under the terms of the
++    Sections above.
++
++    b) Give prominent notice with the combined library of the fact
++    that part of it is a work based on the Library, and explaining
++    where to find the accompanying uncombined form of the same work.
++
++  8. You may not copy, modify, sublicense, link with, or distribute
++the Library except as expressly provided under this License.  Any
++attempt otherwise to copy, modify, sublicense, link with, or
++distribute the Library is void, and will automatically terminate your
++rights under this License.  However, parties who have received copies,
++or rights, from you under this License will not have their licenses
++terminated so long as such parties remain in full compliance.
++
++  9. You are not required to accept this License, since you have not
++signed it.  However, nothing else grants you permission to modify or
++distribute the Library or its derivative works.  These actions are
++prohibited by law if you do not accept this License.  Therefore, by
++modifying or distributing the Library (or any work based on the
++Library), you indicate your acceptance of this License to do so, and
++all its terms and conditions for copying, distributing or modifying
++the Library or works based on it.
++
++  10. Each time you redistribute the Library (or any work based on the
++Library), the recipient automatically receives a license from the
++original licensor to copy, distribute, link with or modify the Library
++subject to these terms and conditions.  You may not impose any further
++restrictions on the recipients' exercise of the rights granted herein.
++You are not responsible for enforcing compliance by third parties with
++this License.
++
++  11. If, as a consequence of a court judgment or allegation of patent
++infringement or for any other reason (not limited to patent issues),
++conditions are imposed on you (whether by court order, agreement or
++otherwise) that contradict the conditions of this License, they do not
++excuse you from the conditions of this License.  If you cannot
++distribute so as to satisfy simultaneously your obligations under this
++License and any other pertinent obligations, then as a consequence you
++may not distribute the Library at all.  For example, if a patent
++license would not permit royalty-free redistribution of the Library by
++all those who receive copies directly or indirectly through you, then
++the only way you could satisfy both it and this License would be to
++refrain entirely from distribution of the Library.
++
++If any portion of this section is held invalid or unenforceable under any
++particular circumstance, the balance of the section is intended to apply,
++and the section as a whole is intended to apply in other circumstances.
++
++It is not the purpose of this section to induce you to infringe any
++patents or other property right claims or to contest validity of any
++such claims; this section has the sole purpose of protecting the
++integrity of the free software distribution system which is
++implemented by public license practices.  Many people have made
++generous contributions to the wide range of software distributed
++through that system in reliance on consistent application of that
++system; it is up to the author/donor to decide if he or she is willing
++to distribute software through any other system and a licensee cannot
++impose that choice.
++
++This section is intended to make thoroughly clear what is believed to
++be a consequence of the rest of this License.
++
++  12. If the distribution and/or use of the Library is restricted in
++certain countries either by patents or by copyrighted interfaces, the
++original copyright holder who places the Library under this License may add
++an explicit geographical distribution limitation excluding those countries,
++so that distribution is permitted only in or among countries not thus
++excluded.  In such case, this License incorporates the limitation as if
++written in the body of this License.
++
++  13. The Free Software Foundation may publish revised and/or new
++versions of the Lesser General Public License from time to time.
++Such new versions will be similar in spirit to the present version,
++but may differ in detail to address new problems or concerns.
++
++Each version is given a distinguishing version number.  If the Library
++specifies a version number of this License which applies to it and
++"any later version", you have the option of following the terms and
++conditions either of that version or of any later version published by
++the Free Software Foundation.  If the Library does not specify a
++license version number, you may choose any version ever published by
++the Free Software Foundation.
++
++  14. If you wish to incorporate parts of the Library into other free
++programs whose distribution conditions are incompatible with these,
++write to the author to ask for permission.  For software which is
++copyrighted by the Free Software Foundation, write to the Free
++Software Foundation; we sometimes make exceptions for this.  Our
++decision will be guided by the two goals of preserving the free status
++of all derivatives of our free software and of promoting the sharing
++and reuse of software generally.
++
++                            NO WARRANTY
++
++  15. BECAUSE THE LIBRARY IS LICENSED FREE OF CHARGE, THERE IS NO
++WARRANTY FOR THE LIBRARY, TO THE EXTENT PERMITTED BY APPLICABLE LAW.
++EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT HOLDERS AND/OR
++OTHER PARTIES PROVIDE THE LIBRARY "AS IS" WITHOUT WARRANTY OF ANY
++KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE
++LIBRARY IS WITH YOU.  SHOULD THE LIBRARY PROVE DEFECTIVE, YOU ASSUME
++THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
++
++  16. IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN
++WRITING WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MAY MODIFY
++AND/OR REDISTRIBUTE THE LIBRARY AS PERMITTED ABOVE, BE LIABLE TO YOU
++FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR
++CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE THE
++LIBRARY (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING
++RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD PARTIES OR A
++FAILURE OF THE LIBRARY TO OPERATE WITH ANY OTHER SOFTWARE), EVEN IF
++SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
++DAMAGES.
++
++                     END OF TERMS AND CONDITIONS
+diff --git a/src/third_party/libbluray/bdnav/clpi_data.h b/src/third_party/libbluray/bdnav/clpi_data.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4751f3a46f9ed193c38080d8609ea7d1caddd7c
+--- /dev/null
++++ b/src/third_party/libbluray/bdnav/clpi_data.h
+@@ -0,0 +1,181 @@
++/*
++ * This file is part of libbluray
++ * Copyright (C) 2009-2010  John Stebbins
++ * Copyright (C) 2012-2013  Petri Hintukainen <phintuka@users.sourceforge.net>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++/**
++ * @file
++ * \brief CLPI (Clip Information) file data
++ */
++
++#if !defined(_CLPI_DATA_H_)
++#define _CLPI_DATA_H_
++
++#include <stdint.h>
++
++typedef struct
++{
++    uint16_t          pcr_pid;
++    uint32_t          spn_stc_start;
++    uint32_t          presentation_start_time;
++    uint32_t          presentation_end_time;
++} CLPI_STC_SEQ;
++
++typedef struct
++{
++    uint32_t          spn_atc_start;
++    uint8_t           num_stc_seq;
++    uint8_t           offset_stc_id;
++    CLPI_STC_SEQ     *stc_seq;
++} CLPI_ATC_SEQ;
++
++typedef struct
++{
++    uint8_t           num_atc_seq;
++    CLPI_ATC_SEQ     *atc_seq;
++} CLPI_SEQ_INFO;
++
++typedef struct
++{
++    uint8_t           validity;
++    char              format_id[5];
++} CLPI_TS_TYPE;
++
++typedef struct
++{
++    uint32_t          delta;
++    char              file_id[6];
++    char              file_code[5];
++} CLPI_ATC_DELTA;
++
++typedef struct {
++    char              file_id[6];
++} CLPI_FONT;
++
++typedef struct {
++    uint8_t           font_count;
++    CLPI_FONT        *font;
++} CLPI_FONT_INFO;
++
++typedef struct
++{
++    uint8_t           clip_stream_type;
++    uint8_t           application_type;
++    uint8_t           is_atc_delta;
++    uint32_t          ts_recording_rate;
++    uint32_t          num_source_packets;
++    CLPI_TS_TYPE      ts_type_info;
++    uint8_t           atc_delta_count;
++    CLPI_ATC_DELTA   *atc_delta;
++    CLPI_FONT_INFO    font_info;      /* Text subtitle stream font files */
++} CLPI_CLIP_INFO;
++
++typedef struct
++{
++    uint16_t          pid;
++    uint8_t           coding_type;
++    uint8_t           format;
++    uint8_t           rate;
++    uint8_t           aspect;
++    uint8_t           oc_flag;
++    uint8_t           char_code;
++    char              lang[4];
++    uint8_t           cr_flag;
++    uint8_t           dynamic_range_type;
++    uint8_t           color_space;
++    uint8_t           hdr_plus_flag;
++    uint8_t           isrc[12];     /* International Standard Recording Code (usually empty or all zeroes) */
++} CLPI_PROG_STREAM;
++
++typedef struct
++{
++    uint32_t          spn_program_sequence_start;
++    uint16_t          program_map_pid;
++    uint8_t           num_streams;
++    uint8_t           num_groups;
++    CLPI_PROG_STREAM *streams;
++} CLPI_PROG;
++
++typedef struct
++{
++    uint8_t           num_prog;
++    CLPI_PROG        *progs;
++} CLPI_PROG_INFO;
++
++typedef struct
++{
++    int               ref_ep_fine_id;
++    int               pts_ep;
++    uint32_t          spn_ep;
++} CLPI_EP_COARSE;
++
++typedef struct
++{
++    uint8_t           is_angle_change_point;
++    uint8_t           i_end_position_offset;
++    int               pts_ep;
++    int               spn_ep;
++} CLPI_EP_FINE;
++
++typedef struct
++{
++    uint16_t          pid;
++    uint8_t           ep_stream_type;
++    int               num_ep_coarse;
++    int               num_ep_fine;
++    uint32_t          ep_map_stream_start_addr;
++    CLPI_EP_COARSE   *coarse;
++    CLPI_EP_FINE     *fine;
++} CLPI_EP_MAP_ENTRY;
++
++typedef struct
++{
++    uint8_t           type;
++    // ep_map
++    uint8_t           num_stream_pid;
++    CLPI_EP_MAP_ENTRY *entry;
++} CLPI_CPI;
++
++/* Extent start points (profile 5 / version 2.4) */
++typedef struct {
++    uint32_t          num_point;
++    uint32_t         *point;
++} CLPI_EXTENT_START;
++
++typedef struct clpi_cl {
++    uint32_t          type_indicator;
++    uint32_t          type_indicator2;
++    uint32_t          sequence_info_start_addr;
++    uint32_t          program_info_start_addr;
++    uint32_t          cpi_start_addr;
++    uint32_t          clip_mark_start_addr;
++    uint32_t          ext_data_start_addr;
++    CLPI_CLIP_INFO    clip;
++    CLPI_SEQ_INFO     sequence;
++    CLPI_PROG_INFO    program;
++    CLPI_CPI          cpi;
++    // skip clip mark & extension data
++
++    // extensions for 3D
++
++    CLPI_EXTENT_START extent_start; /* extent start points (.ssif interleaving) */
++    CLPI_PROG_INFO    program_ss;
++    CLPI_CPI          cpi_ss;
++} CLPI_CL;
++
++#endif // _CLPI_DATA_H_
+diff --git a/src/third_party/libbluray/bdnav/mpls_data.h b/src/third_party/libbluray/bdnav/mpls_data.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..899ca432577cea55cd4ee5e27afd672185d85f0e
+--- /dev/null
++++ b/src/third_party/libbluray/bdnav/mpls_data.h
+@@ -0,0 +1,232 @@
++/*
++ * This file is part of libbluray
++ * Copyright (C) 2009-2010  John Stebbins
++ * Copyright (C) 2012-2016  Petri Hintukainen <phintuka@users.sourceforge.net>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++#if !defined(BLURAY_MPLS_DATA_H_)
++#define BLURAY_MPLS_DATA_H_
++
++#include "uo_mask_table.h"
++
++#include <stdint.h>
++
++#define BD_MARK_ENTRY   0x01
++#define BD_MARK_LINK    0x02
++
++typedef struct
++{
++    uint8_t         stream_type;
++    uint8_t         coding_type;
++    uint16_t        pid;
++    uint8_t         subpath_id;
++    uint8_t         subclip_id;
++    uint8_t         format;
++    uint8_t         rate;
++    uint8_t         dynamic_range_type;
++    uint8_t         color_space;
++    uint8_t         cr_flag;
++    uint8_t         hdr_plus_flag;
++    uint8_t         char_code;
++    char            lang[4];
++    // Secondary audio specific fields
++    uint8_t         sa_num_primary_audio_ref;
++    uint8_t        *sa_primary_audio_ref;
++    // Secondary video specific fields
++    uint8_t         sv_num_secondary_audio_ref;
++    uint8_t         sv_num_pip_pg_ref;
++    uint8_t        *sv_secondary_audio_ref;
++    uint8_t        *sv_pip_pg_ref;
++} MPLS_STREAM;
++
++typedef struct
++{
++    uint8_t         num_video;
++    uint8_t         num_audio;
++    uint8_t         num_pg;
++    uint8_t         num_ig;
++    uint8_t         num_secondary_audio;
++    uint8_t         num_secondary_video;
++    uint8_t         num_pip_pg;
++    uint8_t         num_dv;
++    MPLS_STREAM    *video;
++    MPLS_STREAM    *audio;
++    MPLS_STREAM    *pg;
++    MPLS_STREAM    *ig;
++    MPLS_STREAM    *secondary_audio;
++    MPLS_STREAM    *secondary_video;
++    MPLS_STREAM    *dv;
++} MPLS_STN;
++
++typedef struct
++{
++    char            clip_id[6];
++    char            codec_id[5];
++    uint8_t         stc_id;
++} MPLS_CLIP;
++
++typedef struct
++{
++    uint8_t         is_multi_angle;
++    uint8_t         connection_condition;
++    uint32_t        in_time;
++    uint32_t        out_time;
++    BD_UO_MASK      uo_mask;
++    uint8_t         random_access_flag;
++    uint8_t         still_mode;
++    uint16_t        still_time;
++    uint8_t         angle_count;
++    uint8_t         is_different_audio;
++    uint8_t         is_seamless_angle;
++    MPLS_CLIP       *clip;
++    MPLS_STN        stn;
++} MPLS_PI;
++
++typedef struct
++{
++    uint8_t         mark_type;
++    uint16_t        play_item_ref;
++    uint32_t        time;
++    uint16_t        entry_es_pid;
++    uint32_t        duration;
++} MPLS_PLM;
++
++typedef struct
++{
++    uint8_t         playback_type;
++    uint16_t        playback_count;
++    BD_UO_MASK      uo_mask;
++    uint8_t         random_access_flag;
++    uint8_t         audio_mix_flag;
++    uint8_t         lossless_bypass_flag;
++    uint8_t         mvc_base_view_r_flag;
++    uint8_t         sdr_conversion_notification_flag;
++} MPLS_AI;
++
++typedef struct
++{
++    uint8_t         connection_condition;
++    uint8_t         is_multi_clip;
++    uint32_t        in_time;
++    uint32_t        out_time;
++    uint16_t        sync_play_item_id;
++    uint32_t        sync_pts;
++    uint8_t         clip_count;
++    MPLS_CLIP       *clip;
++} MPLS_SUB_PI;
++
++typedef enum {
++  //mpls_sub_path_        = 2,  /* Primary audio of the Browsable slideshow */
++  mpls_sub_path_ig_menu   = 3,  /* Interactive Graphics presentation menu */
++  mpls_sub_path_textst    = 4,  /* Text Subtitle */
++  //mpls_sub_path_        = 5,  /* Out-of-mux Synchronous elementary streams */
++  mpls_sub_path_async_pip = 6,  /* Out-of-mux Asynchronous Picture-in-Picture presentation */
++  mpls_sub_path_sync_pip  = 7,  /* In-mux Synchronous Picture-in-Picture presentation */
++  mpls_sub_path_ss_video  = 8,  /* SS Video */
++  mpls_sub_path_dv_el     = 10, /* Dolby Vision Enhancement Layer */
++} mpls_sub_path_type;
++
++typedef struct
++{
++    uint8_t         type;       /* enum mpls_sub_path_type */
++    uint8_t         is_repeat;
++    uint8_t         sub_playitem_count;
++    MPLS_SUB_PI     *sub_play_item;
++} MPLS_SUB;
++
++typedef enum {
++    pip_scaling_none = 1,       /* unscaled */
++    pip_scaling_half = 2,       /* 1:2 */
++    pip_scaling_quarter = 3,    /* 1:4 */
++    pip_scaling_one_half = 4,   /* 3:2 */
++    pip_scaling_fullscreen = 5, /* scale to main video size */
++} mpls_pip_scaling;
++
++typedef struct {
++    uint32_t        time;          /* start timestamp (clip time) when the block is valid */
++    uint16_t        xpos;
++    uint16_t        ypos;
++    uint8_t         scale_factor;  /* mpls_pip_scaling. Note: PSR14 may override this ! */
++} MPLS_PIP_DATA;
++
++typedef enum {
++    pip_timeline_sync_mainpath = 1,  /* timeline refers to main path */
++    pip_timeline_async_subpath = 2,  /* timeline refers to sub-path time */
++    pip_timeline_async_mainpath = 3, /* timeline refers to main path */
++} mpls_pip_timeline;
++
++typedef struct {
++    uint16_t        clip_ref;             /* clip id for secondary_video_ref (STN) */
++    uint8_t         secondary_video_ref;  /* secondary video stream id (STN) */
++    uint8_t         timeline_type;        /* mpls_pip_timeline */
++    uint8_t         luma_key_flag;        /* use luma keying */
++    uint8_t         upper_limit_luma_key; /* luma key (secondary video pixels with Y <= this value are transparent) */
++    uint8_t         trick_play_flag;      /* show synchronous PiP when playing trick speed */
++
++    uint16_t        data_count;
++    MPLS_PIP_DATA   *data;
++} MPLS_PIP_METADATA;
++
++typedef enum {
++    primary_green,
++    primary_blue,
++    primary_red
++} mpls_static_primaries;    /* They are stored as GBR, we would like to show them as RGB */
++
++typedef struct mpls_static_metadata
++{
++    uint8_t     dynamic_range_type;
++    uint16_t    display_primaries_x[3];
++    uint16_t    display_primaries_y[3];
++    uint16_t    white_point_x;
++    uint16_t    white_point_y;
++    uint16_t    max_display_mastering_luminance;
++    uint16_t    min_display_mastering_luminance;
++    uint16_t    max_CLL;
++    uint16_t    max_FALL;
++} MPLS_STATIC_METADATA;
++
++typedef struct mpls_pl
++{
++    uint32_t        type_indicator;   /* 'MPLS' */
++    uint32_t        type_indicator2;  /* version */
++    uint32_t        list_pos;
++    uint32_t        mark_pos;
++    uint32_t        ext_pos;
++    MPLS_AI         app_info;
++    uint16_t        list_count;
++    uint16_t        sub_count;
++    uint16_t        mark_count;
++    MPLS_PI        *play_item;
++    MPLS_SUB       *sub_path;
++    MPLS_PLM       *play_mark;
++
++    // extension data (profile 5, version 2.4)
++    uint16_t        ext_sub_count;
++    MPLS_SUB       *ext_sub_path;  // sub path entries extension
++
++    // extension data (Picture-In-Picture metadata)
++    uint16_t           ext_pip_data_count;
++    MPLS_PIP_METADATA *ext_pip_data;  // pip metadata extension
++
++    // extension data (Static Metadata)
++    uint8_t               ext_static_metadata_count;
++    MPLS_STATIC_METADATA *ext_static_metadata;
++
++} MPLS_PL;
++
++#endif // BLURAY_MPLS_DATA_H_
+diff --git a/src/third_party/libbluray/bdnav/uo_mask_table.h b/src/third_party/libbluray/bdnav/uo_mask_table.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..3fc487aa639509ec9f08fc5fbd88f294765b6d59
+--- /dev/null
++++ b/src/third_party/libbluray/bdnav/uo_mask_table.h
+@@ -0,0 +1,94 @@
++/*
++ * This file is part of libbluray
++ * Copyright (C) 2009-2010  John Stebbins
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++#if !defined(_BD_UO_MASK_TABLE_H_)
++#define _BD_UO_MASK_TABLE_H_
++
++typedef enum {
++    UO_MASK_MENU_CALL_INDEX                           = 0,
++    UO_MASK_TITLE_SEARCH_INDEX                        = 1,
++    UO_MASK_CHAPTER_SEARCH_INDEX                      = 2,
++    UO_MASK_TIME_SEARCH_MASK_INDEX                    = 3,
++    UO_MASK_SKIP_TO_NEXT_POINT_MASK_INDEX             = 4,
++    UO_MASK_SKIP_BACK_TO_PREVIOUS_POINT_MASK_INDEX    = 5,
++    UO_MASK_STOP_MASK_INDEX                           = 7,
++    UO_MASK_PAUSE_ON_MASK_INDEX                       = 8,
++    UO_MASK_STILL_OFF_MASK_INDEX                      = 10,
++    UO_MASK_FORWARD_PLAY_MASK_INDEX                   = 11,
++    UO_MASK_BACKWARD_PLAY_MASK_INDEX                  = 12,
++    UO_MASK_RESUME_MASK_INDEX                         = 13,
++    UO_MASK_MOVE_UP_SELECTED_BUTTON_MASK_INDEX        = 14,
++    UO_MASK_MOVE_DOWN_SELECTED_BUTTON_MASK_INDEX      = 15,
++    UO_MASK_MOVE_LEFT_SELECTED_BUTTON_MASK_INDEX      = 16,
++    UO_MASK_MOVE_RIGHT_SELECTED_BUTTON_MASK_INDEX     = 17,
++    UO_MASK_SELECT_BUTTON_MASK_INDEX                  = 18,
++    UO_MASK_ACTIVATE_BUTTON_MASK_INDEX                = 19,
++    UO_MASK_SELECT_AND_ACTIVATE_MASK_INDEX            = 20,
++    UO_MASK_PRIMARY_AUDIO_CHANGE_MASK_INDEX           = 21,
++    UO_MASK_ANGLE_CHANGE_MASK_INDEX                   = 23,
++    UO_MASK_POPUP_ON_MASK_INDEX                       = 24,
++    UO_MASK_POPUP_OFF_MASK_INDEX                      = 25,
++    UO_MASK_PG_TEXTST_ENABLE_DISABLE_MASK_INDEX       = 26,
++    UO_MASK_PG_TEXTST_CHANGE_MASK_INDEX               = 27,
++    UO_MASK_SECONDARY_VIDEO_ENABLE_DISABLE_MASK_INDEX = 28,
++    UO_MASK_SECONDARY_VIDEO_CHANGE_MASK_INDEX         = 29,
++    UO_MASK_SECONDARY_AUDIO_ENABLE_DISABLE_MASK_INDEX = 30,
++    UO_MASK_SECONDARY_AUDIO_CHANGE_MASK_INDEX         = 31,
++    UO_MASK_PIP_PG_TEXTST_CHANGE_MASK_INDEX           = 33,
++} bd_uo_mask_index_e;
++
++typedef struct bd_uo_mask_table
++{
++    unsigned int menu_call : 1;
++    unsigned int title_search : 1;
++    unsigned int chapter_search : 1;
++    unsigned int time_search : 1;
++    unsigned int skip_to_next_point : 1;
++    unsigned int skip_to_prev_point : 1;
++    unsigned int play_firstplay : 1;
++    unsigned int stop : 1;
++    unsigned int pause_on : 1;
++    unsigned int pause_off : 1;
++    unsigned int still_off : 1;
++    unsigned int forward : 1;
++    unsigned int backward : 1;
++    unsigned int resume : 1;
++    unsigned int move_up : 1;
++    unsigned int move_down : 1;
++    unsigned int move_left : 1;
++    unsigned int move_right : 1;
++    unsigned int select : 1;
++    unsigned int activate : 1;
++    unsigned int select_and_activate : 1;
++    unsigned int primary_audio_change : 1;
++    unsigned int reserved0 : 1;
++    unsigned int angle_change : 1;
++    unsigned int popup_on : 1;
++    unsigned int popup_off : 1;
++    unsigned int pg_enable_disable : 1;
++    unsigned int pg_change : 1;
++    unsigned int secondary_video_enable_disable : 1;
++    unsigned int secondary_video_change : 1;
++    unsigned int secondary_audio_enable_disable : 1;
++    unsigned int secondary_audio_change : 1;
++    unsigned int reserved1 : 1;
++    unsigned int pip_pg_change : 1;
++} BD_UO_MASK;
++
++#endif // _BD_UO_MASK_TABLE_H_
+diff --git a/src/third_party/libbluray/bluray.h b/src/third_party/libbluray/bluray.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..95d551aa11081b3d80e56bb3095778041379db67
+--- /dev/null
++++ b/src/third_party/libbluray/bluray.h
+@@ -0,0 +1,1296 @@
++/*
++ * This file is part of libbluray
++ * Copyright (C) 2009-2010  Obliter0n
++ * Copyright (C) 2009-2010  John Stebbins
++ * Copyright (C) 2010-2017  Petri Hintukainen
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++/**
++ * @file
++ * \brief libbluray API
++ */
++
++#ifndef BLURAY_H_
++#define BLURAY_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stdint.h>
++
++#ifdef BLURAY_API_EXPORT
++#include "util/attributes.h"
++#elif !defined(BD_PUBLIC)
++#define BD_PUBLIC
++#endif
++
++#define TITLES_ALL              0    /**< all titles. */
++#define TITLES_FILTER_DUP_TITLE 0x01 /**< remove duplicate titles. */
++#define TITLES_FILTER_DUP_CLIP  0x02 /**< remove titles that have duplicate
++                                          clips. */
++#define TITLES_RELEVANT \
++  (TITLES_FILTER_DUP_TITLE | TITLES_FILTER_DUP_CLIP) /**< remove duplicate
++                                                          titles and clips */
++
++/** This structure is opaque. It represents a libbluray instance. */
++typedef struct bluray BLURAY;
++
++/*
++ * Disc info
++ */
++
++/* AACS error codes */
++#define BD_AACS_CORRUPTED_DISC  -1  /**< Corrupt disc (missing/invalid files) */
++#define BD_AACS_NO_CONFIG       -2  /**< AACS configuration file missing      */
++#define BD_AACS_NO_PK           -3  /**< No valid processing key found        */
++#define BD_AACS_NO_CERT         -4  /**< No valid certificate found           */
++#define BD_AACS_CERT_REVOKED    -5  /**< All certificates have been revoked   */
++#define BD_AACS_MMC_FAILED      -6  /**< MMC (disc drive interaction) failed  */
++
++/** HDMV / BD-J title information */
++typedef struct {
++    const char *name;         /**< optional title name in preferred language */
++    uint8_t     interactive;  /**< 1 if title is interactive (title length and playback position should not be shown in UI) */
++    uint8_t     accessible;   /**< 1 if it is allowed to jump into this title */
++    uint8_t     hidden;       /**< 1 if title number should not be shown during playback */
++
++    uint8_t     bdj;          /**< 0 - HDMV title. 1 - BD-J title */
++    uint32_t    id_ref;       /**< Movie Object number / bdjo file number */
++} BLURAY_TITLE;
++
++/** BluRay disc information */
++typedef struct {
++    uint8_t  bluray_detected;   /**< 1 if BluRay disc was detected */
++
++    /* Disc ID */
++    const char *disc_name;      /**< optional disc name in preferred language */
++    const char *udf_volume_id;  /**< optional UDF volume identifier */
++    uint8_t     disc_id[20];    /**< Disc ID */
++
++    /** HDMV / BD-J titles */
++    uint8_t  no_menu_support;            /**< 1 if this disc can't be played using on-disc menus */
++    uint8_t  first_play_supported;       /**< 1 if First Play title is present on the disc and can be played */
++    uint8_t  top_menu_supported;         /**< 1 if Top Menu title is present on the disc and can be played */
++
++    uint32_t             num_titles;     /**< number of titles on the disc, not including "First Play" and "Top Menu" */
++    const BLURAY_TITLE  *const *titles;  /**< index is title number 1 ... N */
++    const BLURAY_TITLE  *first_play;     /**< titles[N+1].   NULL if not present on the disc. */
++    const BLURAY_TITLE  *top_menu;       /**< titles[0]. NULL if not present on the disc. */
++
++    uint32_t num_hdmv_titles;            /**< number of HDMV titles */
++    uint32_t num_bdj_titles;             /**< number of BD-J titles */
++    uint32_t num_unsupported_titles;     /**< number of unsupported titles */
++
++    /** BD-J info (valid only if disc uses BD-J) */
++    uint8_t  bdj_detected;     /**< 1 if disc uses BD-J */
++    uint8_t  bdj_supported;    /**< (deprecated) */
++    uint8_t  libjvm_detected;  /**< 1 if usable Java VM was found */
++    uint8_t  bdj_handled;      /**< 1 if usable Java VM + libbluray.jar was found */
++
++    char bdj_org_id[9];        /**< (BD-J) disc organization ID */
++    char bdj_disc_id[33];      /**< (BD-J) disc ID */
++
++    /* disc application info */
++    uint8_t video_format;                     /**< \ref bd_video_format_e */
++    uint8_t frame_rate;                       /**< \ref bd_video_rate_e */
++    uint8_t content_exist_3D;                 /**< 1 if 3D content exists on the disc */
++    uint8_t initial_output_mode_preference;   /**< 0 - 2D, 1 - 3D */
++    uint8_t provider_data[32];                /**< Content provider data */
++
++    /* AACS info  (valid only if disc uses AACS) */
++    uint8_t  aacs_detected;     /**< 1 if disc is using AACS encoding */
++    uint8_t  libaacs_detected;  /**< 1 if usable AACS decoding library was found */
++    uint8_t  aacs_handled;      /**< 1 if disc is using supported AACS encoding */
++
++    int      aacs_error_code;   /**< AACS error code (BD_AACS_*) */
++    int      aacs_mkbv;         /**< AACS MKB version */
++
++    /* BD+ info  (valid only if disc uses BD+) */
++    uint8_t  bdplus_detected;     /**< 1 if disc is using BD+ encoding */
++    uint8_t  libbdplus_detected;  /**< 1 if usable BD+ decoding library was found */
++    uint8_t  bdplus_handled;      /**< 1 if disc is using supporred BD+ encoding */
++
++    uint8_t  bdplus_gen;          /**< BD+ content code generation */
++    uint32_t bdplus_date;         /**< BD+ content code relese date ((year<<16)|(month<<8)|day) */
++
++    /* disc application info (libbluray > 1.2.0) */
++    uint8_t initial_dynamic_range_type; /**< bd_dynamic_range_type_e */
++
++} BLURAY_DISC_INFO;
++
++/*
++ * Playlist info
++ */
++
++/** Stream video coding type */
++typedef enum {
++    BLURAY_STREAM_TYPE_VIDEO_MPEG1              = 0x01,
++    BLURAY_STREAM_TYPE_VIDEO_MPEG2              = 0x02,
++    BLURAY_STREAM_TYPE_AUDIO_MPEG1              = 0x03,
++    BLURAY_STREAM_TYPE_AUDIO_MPEG2              = 0x04,
++    BLURAY_STREAM_TYPE_AUDIO_LPCM               = 0x80,
++    BLURAY_STREAM_TYPE_AUDIO_AC3                = 0x81,
++    BLURAY_STREAM_TYPE_AUDIO_DTS                = 0x82,
++    BLURAY_STREAM_TYPE_AUDIO_TRUHD              = 0x83,
++    BLURAY_STREAM_TYPE_AUDIO_AC3PLUS            = 0x84,
++    BLURAY_STREAM_TYPE_AUDIO_DTSHD              = 0x85,
++    BLURAY_STREAM_TYPE_AUDIO_DTSHD_MASTER       = 0x86,
++    BLURAY_STREAM_TYPE_VIDEO_VC1                = 0xea,
++    BLURAY_STREAM_TYPE_VIDEO_H264               = 0x1b,
++    BLURAY_STREAM_TYPE_VIDEO_HEVC               = 0x24,
++    BLURAY_STREAM_TYPE_SUB_PG                   = 0x90,
++    BLURAY_STREAM_TYPE_SUB_IG                   = 0x91,
++    BLURAY_STREAM_TYPE_SUB_TEXT                 = 0x92,
++    BLURAY_STREAM_TYPE_AUDIO_AC3PLUS_SECONDARY  = 0xa1,
++    BLURAY_STREAM_TYPE_AUDIO_DTSHD_SECONDARY    = 0xa2
++} bd_stream_type_e;
++
++/** Stream video format */
++typedef enum {
++    BLURAY_VIDEO_FORMAT_480I              = 1,  /**< ITU-R BT.601-5 */
++    BLURAY_VIDEO_FORMAT_576I              = 2,  /**< ITU-R BT.601-4 */
++    BLURAY_VIDEO_FORMAT_480P              = 3,  /**< SMPTE 293M */
++    BLURAY_VIDEO_FORMAT_1080I             = 4,  /**< SMPTE 274M */
++    BLURAY_VIDEO_FORMAT_720P              = 5,  /**< SMPTE 296M */
++    BLURAY_VIDEO_FORMAT_1080P             = 6,  /**< SMPTE 274M */
++    BLURAY_VIDEO_FORMAT_576P              = 7,  /**< ITU-R BT.1358 */
++    BLURAY_VIDEO_FORMAT_2160P             = 8,  /**< BT.2020 */
++} bd_video_format_e;
++
++/** Stream video frame rate */
++typedef enum {
++    BLURAY_VIDEO_RATE_24000_1001          = 1,  /**< 23.976 Hz */
++    BLURAY_VIDEO_RATE_24                  = 2,  /**< 24 Hz */
++    BLURAY_VIDEO_RATE_25                  = 3,  /**< 25 Hz */
++    BLURAY_VIDEO_RATE_30000_1001          = 4,  /**< 29.97 Hz */
++    BLURAY_VIDEO_RATE_50                  = 6,  /**< 50 Hz */
++    BLURAY_VIDEO_RATE_60000_1001          = 7   /**< 59.94 Hz */
++} bd_video_rate_e;
++
++/** Stream video aspect ratio */
++typedef enum {
++    BLURAY_ASPECT_RATIO_4_3               = 2,
++    BLURAY_ASPECT_RATIO_16_9              = 3
++} bd_video_aspect_e;
++
++/** Stream audio format */
++typedef enum {
++    BLURAY_AUDIO_FORMAT_MONO              = 1,
++    BLURAY_AUDIO_FORMAT_STEREO            = 3,
++    BLURAY_AUDIO_FORMAT_MULTI_CHAN        = 6,
++    BLURAY_AUDIO_FORMAT_COMBO             = 12  // Stereo ac3/dts, 
++} bd_audio_format_e;
++                                                // multi mlp/dts-hd
++/** Stream audio rate */
++typedef enum {
++    BLURAY_AUDIO_RATE_48                  = 1,
++    BLURAY_AUDIO_RATE_96                  = 4,
++    BLURAY_AUDIO_RATE_192                 = 5,
++    BLURAY_AUDIO_RATE_192_COMBO           = 12, // 48 or 96 ac3/dts
++                                                // 192 mpl/dts-hd
++    BLURAY_AUDIO_RATE_96_COMBO            = 14  // 48 ac3/dts
++                                                // 96 mpl/dts-hd
++} bd_audio_rate_e;
++
++/** Text subtitle charset */
++typedef enum {
++    BLURAY_TEXT_CHAR_CODE_UTF8            = 0x01,
++    BLURAY_TEXT_CHAR_CODE_UTF16BE         = 0x02,
++    BLURAY_TEXT_CHAR_CODE_SHIFT_JIS       = 0x03,
++    BLURAY_TEXT_CHAR_CODE_EUC_KR          = 0x04,
++    BLURAY_TEXT_CHAR_CODE_GB18030_20001   = 0x05,
++    BLURAY_TEXT_CHAR_CODE_CN_GB           = 0x06,
++    BLURAY_TEXT_CHAR_CODE_BIG5            = 0x07
++} bd_char_code_e;
++
++/** Clip still mode type */
++typedef enum {
++    BLURAY_STILL_NONE     = 0x00,  /**< No still (normal playback) */
++    BLURAY_STILL_TIME     = 0x01,  /**< Still playback for fixed time */
++    BLURAY_STILL_INFINITE = 0x02,  /**< Infinite still */
++} bd_still_mode_e;
++
++/** Mark type */
++typedef enum {
++    BLURAY_MARK_ENTRY     = 0x01,  /**< entry mark for chapter search */
++    BLURAY_MARK_LINK      = 0x02,  /**< link point */
++} bd_mark_type_e;
++
++/** Clip dynamic range */
++typedef enum {
++    BLURAY_DYNAMIC_RANGE_SDR          = 0,
++    BLURAY_DYNAMIC_RANGE_HDR10        = 1,
++    BLURAY_DYNAMIC_RANGE_DOLBY_VISION = 2
++} bd_dynamic_range_type_e;
++
++typedef enum {
++    BLURAY_COLOR_SPACE_BT709  = 1,
++    BLURAY_COLOR_SPACE_BT2020 = 2
++} bd_color_space_e;
++
++/** Clip substream information */
++typedef struct bd_stream_info {
++    uint8_t     coding_type;  /**< Stream coding (\ref bd_stream_type_e) */
++    uint8_t     format;       /**< Stream format (\ref bd_video_format_e or \ref bd_audio_format_e) */
++    uint8_t     rate;         /**< Stream frame rate (\ref bd_audio_rate_e or \ref bd_video_rate_e) */
++    uint8_t     char_code;    /**< Text subtitle charachter code (\ref bd_char_code_e) */
++    uint8_t     lang[4];      /**< Language code */
++    uint16_t    pid;          /**< mpeg-ts PID */
++    uint8_t     aspect;       /**< Stream video aspect ratio (\ref bd_video_aspect_e) */
++    uint8_t     subpath_id;   /**< Sub path identifier (= separate mpeg-ts mux / .m2ts file) */
++    uint8_t     dynamic_range_type;
++    uint8_t     color_space;
++    uint8_t     cr_flag;
++    uint8_t     hdr_plus_flag;
++} BLURAY_STREAM_INFO;
++
++/** Clip information */
++typedef struct bd_clip {
++    uint32_t           pkt_count;               /**< Number of mpeg-ts packets */
++    uint8_t            still_mode;              /**< Clip still mode (\ref bd_still_mode_e) */
++    uint16_t           still_time;              /**< Still time (seconds) if still_mode == BD_STILL_TIME */
++    uint8_t            video_stream_count;      /**< Number of video streams */
++    uint8_t            audio_stream_count;      /**< Number of audio streams */
++    uint8_t            pg_stream_count;         /**< Number of PG (Presentation Graphics) streams */
++    uint8_t            ig_stream_count;         /**< Number of IG (Interactive Graphics) streams */
++    uint8_t            sec_audio_stream_count;  /**< Number of secondary audio streams */
++    uint8_t            sec_video_stream_count;  /**< Number of secondary video streams */
++    uint8_t            dv_stream_count;
++    BLURAY_STREAM_INFO *video_streams;          /**< Video streams information */
++    BLURAY_STREAM_INFO *audio_streams;          /**< Audio streams information */
++    BLURAY_STREAM_INFO *pg_streams;             /**< PG (Presentation Graphics) streams information */
++    BLURAY_STREAM_INFO *ig_streams;             /**< IG (Interactive Graphics) streams information */
++    BLURAY_STREAM_INFO *sec_audio_streams;      /**< Secondary audio streams information */
++    BLURAY_STREAM_INFO *sec_video_streams;      /**< Secondary video streams information */
++    BLURAY_STREAM_INFO *dv_streams;
++
++    uint64_t           start_time;  /**< start media time, 90kHz, ("playlist time") */
++    uint64_t           in_time;     /**< start timestamp, 90kHz */
++    uint64_t           out_time;    /**< end timestamp, 90kHz */
++    char               clip_id[6];  /**< Clip identifier (.m2ts file name) */
++} BLURAY_CLIP_INFO;
++
++/** Chapter entry */
++typedef struct bd_chapter {
++    uint32_t    idx;       /**< Chapter index (number - 1) */
++    uint64_t    start;     /**< start media time, 90kHz, ("playlist time") */
++    uint64_t    duration;  /**< duration */
++    uint64_t    offset;    /**< distance from title start, bytes */
++    unsigned    clip_ref;  /**< Clip reference (index to playlist clips list) */
++
++    /** Chapter name in preferred language (optional, libbluray >= 1.5.0) */
++    const char *chapter_name;
++} BLURAY_TITLE_CHAPTER;
++
++/** Playmark information */
++typedef struct bd_mark {
++    uint32_t    idx;       /**< Mark index (number - 1) */
++    int         type;      /**< \ref bd_mark_type_e */
++    uint64_t    start;     /**< mark media time, 90kHz, ("playlist time") */
++    uint64_t    duration;  /**< time to next mark */
++    uint64_t    offset;    /**< mark distance from title start, bytes */
++    unsigned    clip_ref;  /**< Clip reference (index to playlist clips list) */
++} BLURAY_TITLE_MARK;
++
++/** Playlist information */
++typedef struct bd_title_info {
++    uint32_t             idx;            /**< Playlist index number (filled only with bd_get_title_info()) */
++    uint32_t             playlist;       /**< Playlist ID (mpls file name) */
++    uint64_t             duration;       /**< Playlist duration, 90 kHz */
++    uint32_t             clip_count;     /**< Number of clips */
++    uint8_t              angle_count;    /**< Number of angles */
++    uint32_t             chapter_count;  /**< Number of chapters */
++    uint32_t             mark_count;     /**< Number of playmarks */
++    BLURAY_CLIP_INFO     *clips;         /**< Clip information */
++    BLURAY_TITLE_CHAPTER *chapters;      /**< Chapter information */
++    BLURAY_TITLE_MARK    *marks;         /**< Playmark information */
++
++    uint8_t              mvc_base_view_r_flag;  /**< MVC base view (0 - left, 1 - right) */
++    uint8_t              sdr_conversion_notification_flag;
++} BLURAY_TITLE_INFO;
++
++/** Sound effect data */
++typedef struct bd_sound_effect {
++    uint8_t         num_channels; /**< 1 - mono, 2 - stereo */
++    uint32_t        num_frames;   /**< Number of audio frames */
++    const int16_t  *samples;      /**< 48000 Hz, 16 bit LPCM. Interleaved if stereo */
++} BLURAY_SOUND_EFFECT;
++
++
++/**
++ *  Get libbluray version
++ *
++ *  Get the version of libbluray (runtime)
++ *
++ *  See also bluray-version.h
++ *
++ * @param major where to store major version
++ * @param minor where to store minor version
++ * @param micro where to store micro version
++ */
++BD_PUBLIC void bd_get_version(int *major, int *minor, int *micro);
++
++/*
++ * Disc functions
++ */
++
++struct bd_dir_s;
++struct bd_file_s;
++struct meta_dl;
++
++/**
++ *  Open BluRay disc
++ *
++ *  Shortcut for bd_open_disc(bd_init(), device_path, keyfile_path)
++ *
++ * @param device_path   path to mounted Blu-ray disc, device or image file
++ * @param keyfile_path  path to KEYDB.cfg (may be NULL)
++ * @return allocated BLURAY object, NULL if error
++ */
++BD_PUBLIC BLURAY *bd_open(const char *device_path, const char *keyfile_path);
++
++/**
++ *  Initialize BLURAY object
++ *
++ *  Resulting object can be passed to following bd_open_??? functions.
++ *
++ * @return allocated BLURAY object, NULL if error
++ */
++BD_PUBLIC BLURAY *bd_init(void);
++
++/**
++ *  Open BluRay disc
++ *
++ * @param bd  BLURAY object
++ * @param device_path   path to mounted Blu-ray disc, device or image file
++ * @param keyfile_path  path to KEYDB.cfg (may be NULL)
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_open_disc(BLURAY *bd, const char *device_path, const char *keyfile_path);
++
++/**
++ *  Open BluRay disc
++ *
++ * @param bd  BLURAY object
++ * @param read_blocks_handle  opaque handle for read_blocks
++ * @param read_blocks  function used to read disc blocks
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_open_stream(BLURAY *bd,
++                   void *read_blocks_handle,
++                   int (*read_blocks)(void *handle, void *buf, int lba, int num_blocks));
++
++/**
++ *  Open BluRay disc
++ *
++ * @param bd  BLURAY object
++ * @param handle  opaque handle for open_dir and open_file
++ * @param open_dir  function used to open a directory
++ * @param open_file  function used to open a file
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_open_files(BLURAY *bd,
++                  void *handle,
++                  struct bd_dir_s *(*open_dir)(void *handle, const char *rel_path),
++                  struct bd_file_s *(*open_file)(void *handle, const char *rel_path));
++
++/**
++ *  Close BluRay disc
++ *
++ * @param bd  BLURAY object
++ */
++BD_PUBLIC void bd_close(BLURAY *bd);
++
++/**
++ *
++ *  Get information about current BluRay disc
++ *
++ * @param bd  BLURAY object
++ * @return pointer to BLURAY_DISC_INFO object, NULL on error
++ */
++BD_PUBLIC const BLURAY_DISC_INFO *bd_get_disc_info(BLURAY *bd);
++
++/**
++ *
++ *  Get meta information about current BluRay disc.
++ *
++ *  Meta information is optional in BluRay discs.
++ *  If information is provided in multiple languages, currently
++ *  selected language (BLURAY_PLAYER_SETTING_MENU_LANG) is used.
++ *
++ *  Referenced thumbnail images should be read with bd_get_meta_file().
++ *
++ * @param bd  BLURAY object
++ * @return META_DL (disclib) object, NULL on error
++ */
++BD_PUBLIC const struct meta_dl *bd_get_meta(BLURAY *bd);
++
++/**
++ *
++ *  Read metadata file from BluRay disc.
++ *
++ *  Allocate large enough memory block and read file contents.
++ *  Caller must free the memory block with free().
++ *
++ * @param bd  BLURAY object
++ * @param file_name  name of metadata file
++ * @param data  where to store pointer to file data
++ * @param size  where to store file size
++ * @return 1 on success, 0 on error
++ */
++BD_PUBLIC int bd_get_meta_file(BLURAY *bd, const char *file_name, void **data, int64_t *size);
++
++
++/*
++ * Title selection without on-disc menus
++ */
++
++/**
++ *
++ *  Get number of titles (playlists)
++ *
++ *  This must be called after bd_open() and before bd_select_title().
++ *  Populates the title list in BLURAY.
++ *  Filtering of the returned list is controled through title flags
++ *
++ * @param bd  BLURAY object
++ * @param flags  title flags
++ * @param min_title_length  filter out titles shorter than min_title_length seconds
++ * @return number of titles found
++ */
++BD_PUBLIC uint32_t bd_get_titles(BLURAY *bd, uint8_t flags, uint32_t min_title_length);
++
++/**
++ *
++ *  Get main title
++ *  Returned number is an index to the list created by bd_get_titles()
++ *
++ * @param bd  BLURAY object
++ * @return title index of main title, -1 on error
++ */
++BD_PUBLIC int bd_get_main_title(BLURAY *bd);
++
++/**
++ *
++ *  Get information about a title
++ *
++ * @param bd  BLURAY object
++ * @param title_idx title index number
++ * @param angle angle number (chapter offsets and clip size depend on selected angle)
++ * @return allocated BLURAY_TITLE_INFO object, NULL on error
++ */
++BD_PUBLIC BLURAY_TITLE_INFO* bd_get_title_info(BLURAY *bd, uint32_t title_idx, unsigned angle);
++
++/**
++ *
++ *  Free BLURAY_TITLE_INFO object
++ *
++ * @param title_info  BLURAY_TITLE_INFO object
++ */
++BD_PUBLIC void bd_free_title_info(BLURAY_TITLE_INFO *title_info);
++
++/**
++ *
++ *  Select the title from the list created by bd_get_titles()
++ *
++ * @param bd  BLURAY object
++ * @param title title to select
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_select_title(BLURAY *bd, uint32_t title);
++
++/**
++ *
++ *  Select a playlist
++ *
++ * @param bd  BLURAY object
++ * @param playlist playlist to select
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_select_playlist(BLURAY *bd, uint32_t playlist);
++
++/**
++ *
++ *  Returns the current title index
++ *
++ * @param bd  BLURAY object
++ * @return current title index
++ */
++BD_PUBLIC uint32_t bd_get_current_title(BLURAY *bd);
++
++/**
++ *
++ *  Read from currently selected title file, decrypt if possible
++ *
++ * @param bd  BLURAY object
++ * @param buf buffer to read data into
++ * @param len size of data to be read
++ * @return size of data read, -1 if error, 0 if EOF
++ */
++BD_PUBLIC int bd_read(BLURAY *bd, unsigned char *buf, int len);
++
++
++/*
++ * Playback control functions
++ */
++
++/**
++ *
++ *  Seek to pos in currently selected title.
++ *
++ * @param bd  BLURAY object
++ * @param pos position to seek to
++ * @return current seek position
++ */
++BD_PUBLIC int64_t bd_seek(BLURAY *bd, uint64_t pos);
++
++/**
++ *
++ *  Seek to specific time in 90Khz ticks.
++ *
++ *  May fail if UO mask bit BLURAY_UO_TIME_SEARCH_MASK is set.
++ *
++ * @param bd  BLURAY object
++ * @param tick tick count
++ * @return <0 on UO mask restriction, current seek position otherwise
++ */
++BD_PUBLIC int64_t bd_seek_time(BLURAY *bd, uint64_t tick);
++
++/**
++ *
++ *  Seek to a chapter.
++ *
++ *  First chapter is 0.
++ *  May fail if UO mask bit BLURAY_UO_CHAPTER_SEARCH is set.
++ *
++ * @param bd  BLURAY object
++ * @param chapter chapter to seek to
++ * @return <0 on UO mask restriction, current seek position otherwise
++ */
++BD_PUBLIC int64_t bd_seek_chapter(BLURAY *bd, unsigned chapter);
++
++/**
++ *
++ * Seek to a playmark. First mark is 0
++ *
++ * @param bd  BLURAY object
++ * @param mark playmark to seek to
++ * @return current seek position
++ */
++BD_PUBLIC int64_t bd_seek_mark(BLURAY *bd, unsigned mark);
++
++/**
++ *
++ *  Seek to a playitem.
++ *
++ * @param bd  BLURAY object
++ * @param clip_ref playitem to seek to
++ * @return current seek position
++ */
++BD_PUBLIC int64_t bd_seek_playitem(BLURAY *bd, unsigned clip_ref);
++
++/**
++ *
++ *  Set the angle to play.
++ *
++ *  May fail if UO mask bit UO_MASK_ANGLE_CHANGE_MASK_INDEX is set.
++ *
++ * @param bd  BLURAY object
++ * @param angle angle to play
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int bd_select_angle(BLURAY *bd, unsigned angle);
++
++/**
++ *
++ *  Initiate seamless angle change
++ *
++ * @param bd  BLURAY object
++ * @param angle angle to change to
++ */
++BD_PUBLIC void bd_seamless_angle_change(BLURAY *bd, unsigned angle);
++
++/**
++ *
++ *  Select stream (PG / TextST track)
++ *
++ *  When playing with on-disc menus:
++ *
++ *  Stream selection is controlled by on-disc menus.
++ *  If user can change stream selection also in player GUI, this function
++ *  should be used to keep on-disc menus in sync with player GUI.
++ *
++ *  When playing the disc without on-disc menus:
++ *
++ *  Initial stream selection is done using preferred language settings.
++ *  This function can be used to override automatic stream selection.
++ *  Without on-disc menus selecting the stream is useful only when using
++ *  libbluray internal decoders or the stream is stored in a sub-path.
++ *
++ *  Depending on stream type, may fail if one of the following UO mask bit is set:
++ *    - UO_MASK_PRIMARY_AUDIO_CHANGE_MASK_INDEX (BLURAY_AUDIO_STREAM);
++ *    - UO_MASK_PG_TEXTST_ENABLE_DISABLE_MASK_INDEX (BLURAY_PG_TEXTST_STREAM);
++ *    - UO_MASK_PG_TEXTST_CHANGE_MASK_INDEX (BLURAY_PG_TEXTST_STREAM);
++ *  or if the requested stream number is out of range. If multiple changes are
++ *  made (e.g. enable and change PG/TextST track), the non-masked UOs are
++ *  applied (but this function might still return 0 if at least one change was
++ *  prohibited).
++ *
++ * @param bd  BLURAY object
++ * @param stream_type  BLURAY_AUDIO_STREAM or BLURAY_PG_TEXTST_STREAM
++ * @param stream_id  stream number (1..N)
++ * @param enable_flag  set to 0 to disable streams of this type
++ * @return <0 on error, 1 if the stream was selected, 0 if no change was made, or was prevented by the UO mask
++ */
++BD_PUBLIC int bd_select_stream(BLURAY *bd, uint32_t stream_type, uint32_t stream_id, uint32_t enable_flag);
++
++#define BLURAY_AUDIO_STREAM      0   /**< Select audio stream     */
++#define BLURAY_PG_TEXTST_STREAM  1   /**< Select subtitle stream  */
++
++
++/*
++ * Playback status functions
++ */
++
++/**
++ *
++ *  Find the byte position of a chapter
++ *
++ * @param bd  BLURAY object
++ * @param chapter chapter to find position of
++ * @return seek position of chapter start
++ */
++BD_PUBLIC int64_t bd_chapter_pos(BLURAY *bd, unsigned chapter);
++
++/**
++ *
++ *  Get the current chapter
++ *
++ * @param bd  BLURAY object
++ * @return current chapter
++ */
++BD_PUBLIC uint32_t bd_get_current_chapter(BLURAY *bd);
++
++/**
++ *
++ *  Returns file size in bytes of currently selected title, 0 in no title
++ *  selected
++ *
++ * @param bd  BLURAY object
++ * @return file size in bytes of currently selected title, 0 if no title
++ * selected
++ */
++BD_PUBLIC uint64_t bd_get_title_size(BLURAY *bd);
++
++/**
++ *
++ *  Return the current angle
++ *
++ * @param bd  BLURAY object
++ * @return current angle
++ */
++BD_PUBLIC unsigned bd_get_current_angle(BLURAY *bd);
++
++/**
++ *
++ *  Return current pos
++ *
++ * @param bd  BLURAY object
++ * @return current seek position
++ */
++BD_PUBLIC uint64_t bd_tell(BLURAY *bd);
++
++/**
++ *
++ *  Return current time
++ *
++ * @param bd  BLURAY object
++ * @return current time
++ */
++BD_PUBLIC uint64_t bd_tell_time(BLURAY *bd);
++
++
++/*
++ * player settings
++ */
++
++/** Player setting */
++typedef enum {
++    BLURAY_PLAYER_SETTING_AUDIO_LANG     = 16,    /**< Initial audio language.      String (ISO 639-2/T). */
++    BLURAY_PLAYER_SETTING_PG_LANG        = 17,    /**< Initial PG/SPU language.     String (ISO 639-2/T). */
++    BLURAY_PLAYER_SETTING_MENU_LANG      = 18,    /**< Initial menu language.       String (ISO 639-2/T). */
++    BLURAY_PLAYER_SETTING_COUNTRY_CODE   = 19,    /**< Player country code.         String (ISO 3166-1/alpha-2). */
++    BLURAY_PLAYER_SETTING_REGION_CODE    = 20,    /**< Player region code.          Integer. */
++    BLURAY_PLAYER_SETTING_OUTPUT_PREFER  = 21,    /**< Output mode preference.      Integer. */
++    BLURAY_PLAYER_SETTING_PARENTAL       = 13,    /**< Age for parental control.    Integer. */
++    BLURAY_PLAYER_SETTING_AUDIO_CAP      = 15,    /**< Audio capability.            Bit mask. */
++    BLURAY_PLAYER_SETTING_VIDEO_CAP      = 29,    /**< Video capability.            Bit mask. */
++    BLURAY_PLAYER_SETTING_DISPLAY_CAP    = 23,    /**< Display capability.          Bit mask. */
++    BLURAY_PLAYER_SETTING_3D_CAP         = 24,    /**< 3D capability.               Bit mask. */
++    BLURAY_PLAYER_SETTING_UHD_CAP         = 25,   /**< UHD capability.              */
++    BLURAY_PLAYER_SETTING_UHD_DISPLAY_CAP = 26,   /**< UHD display capability.      */
++    BLURAY_PLAYER_SETTING_HDR_PREFERENCE  = 27,   /**< HDR preference.              */
++    BLURAY_PLAYER_SETTING_SDR_CONV_PREFER = 28,   /**< SDR conversion preference.   */
++    BLURAY_PLAYER_SETTING_TEXT_CAP       = 30,    /**< Text Subtitle capability.    Bit mask. */
++    BLURAY_PLAYER_SETTING_PLAYER_PROFILE = 31,    /**< Player profile and version. */
++
++    BLURAY_PLAYER_SETTING_DECODE_PG            = 0x100, /**< Enable/disable PG (subtitle) decoder. Integer. Default: disabled. */
++    BLURAY_PLAYER_SETTING_PERSISTENT_STORAGE   = 0x101, /**< Enable/disable BD-J persistent storage. Integer. Default: enabled. */
++    BLURAY_PLAYER_SETTING_UO_RESTRICTION_LEVEL = 0x102, /**< Set User Operations (UO) restriction mask enforcement level. bd_player_setting_uo_restriction_level value. Default: BLURAY_PLAYER_SETTING_UO_RESTRICTION_RELAXED. */
++
++    BLURAY_PLAYER_PERSISTENT_ROOT              = 0x200, /**< Root path to the BD_J persistent storage location. String. */
++    BLURAY_PLAYER_CACHE_ROOT                   = 0x201, /**< Root path to the BD_J cache storage location. String. */
++    BLURAY_PLAYER_JAVA_HOME                    = 0x202, /**< Location of JRE. String. Default: NULL (autodetect). */
++} bd_player_setting;
++
++/**
++ *
++ *  Update player setting
++ *
++ *  Bit masks and enumeration values are defined in player_settings.h.
++ *
++ * @param bd  BLURAY object
++ * @param idx Player setting to update
++ * @param value New value for player setting
++ * @return 1 on success, 0 on error (invalid setting)
++ */
++
++BD_PUBLIC int bd_set_player_setting(BLURAY *bd, uint32_t idx, uint32_t value);
++
++/**
++ *
++ *  Update player setting (string)
++ *
++ * @param bd  BLURAY object
++ * @param idx Player setting to update
++ * @param value New value for player setting
++ * @return 1 on success, 0 on error (invalid setting)
++ */
++BD_PUBLIC int bd_set_player_setting_str(BLURAY *bd, uint32_t idx, const char *value);
++
++
++/*
++ * events
++ */
++
++/** Event type */
++typedef enum {
++
++    BD_EVENT_NONE         = 0,  /**< no pending events */
++
++    /*
++     * errors
++     */
++
++    BD_EVENT_ERROR        = 1,  /**< Fatal error. Playback can't be continued. */
++    BD_EVENT_READ_ERROR   = 2,  /**< Reading of .m2ts aligned unit failed. Next call to read will try next block. */
++    BD_EVENT_ENCRYPTED    = 3,  /**< .m2ts file is encrypted and can't be played */
++
++    /*
++     * current playback position
++     */
++
++    BD_EVENT_ANGLE        = 4,  /**< current angle, 1...N */
++    BD_EVENT_TITLE        = 5,  /**< current title, 1...N (0 = top menu) */
++    BD_EVENT_PLAYLIST     = 6,  /**< current playlist (xxxxx.mpls) */
++    BD_EVENT_PLAYITEM     = 7,  /**< current play item, 0...N-1  */
++    BD_EVENT_CHAPTER      = 8,  /**< current chapter, 1...N */
++    BD_EVENT_PLAYMARK     = 9,  /**< playmark reached */
++    BD_EVENT_END_OF_TITLE = 10, /**< end of title reached */
++
++    /*
++     * stream selection
++     */
++
++    BD_EVENT_AUDIO_STREAM           = 11,  /**< 1..32,  0xff  = none */
++    BD_EVENT_IG_STREAM              = 12,  /**< 1..32                */
++    BD_EVENT_PG_TEXTST_STREAM       = 13,  /**< 1..255, 0xfff = none */
++    BD_EVENT_PIP_PG_TEXTST_STREAM   = 14,  /**< 1..255, 0xfff = none */
++    BD_EVENT_SECONDARY_AUDIO_STREAM = 15,  /**< 1..32,  0xff  = none */
++    BD_EVENT_SECONDARY_VIDEO_STREAM = 16,  /**< 1..32,  0xff  = none */
++
++    BD_EVENT_PG_TEXTST              = 17,  /**< 0 - disable, 1 - enable */
++    BD_EVENT_PIP_PG_TEXTST          = 18,  /**< 0 - disable, 1 - enable */
++    BD_EVENT_SECONDARY_AUDIO        = 19,  /**< 0 - disable, 1 - enable */
++    BD_EVENT_SECONDARY_VIDEO        = 20,  /**< 0 - disable, 1 - enable */
++    BD_EVENT_SECONDARY_VIDEO_SIZE   = 21,  /**< 0 - PIP, 0xf - fullscreen */
++
++    /*
++     * playback control
++     */
++
++    /** HDMV VM or JVM stopped playlist playback. Flush all buffers. */
++    BD_EVENT_PLAYLIST_STOP          = 22,
++
++    /** discontinuity in the stream (non-seamless connection). Reset demuxer PES buffers. */
++    BD_EVENT_DISCONTINUITY          = 23,  /**< new timestamp (45 kHz) */
++
++    /** HDMV VM or JVM seeked the stream. Next read() will return data from new position. Flush all buffers. */
++    BD_EVENT_SEEK                   = 24,  /**< new media time (45 kHz) */
++
++    /** still playback (pause) */
++    BD_EVENT_STILL                  = 25,  /**< 0 - off, 1 - on */
++
++    /** Still playback for n seconds (reached end of still mode play item).
++     *  Playback continues by calling bd_read_skip_still(). */
++    BD_EVENT_STILL_TIME             = 26,  /**< 0 = infinite ; 1...300 = seconds */
++
++    /** Play sound effect */
++    BD_EVENT_SOUND_EFFECT           = 27,  /**< effect ID */
++
++    /*
++     * status
++     */
++
++    /** Nothing to do. Playlist is not playing, but title applet is running.
++     *  Application should not call bd_read*() immediately again to avoid busy loop. */
++    BD_EVENT_IDLE                   = 28,
++
++    /** Pop-Up menu available */
++    BD_EVENT_POPUP                  = 29,  /**< 0 - no, 1 - yes */
++
++    /** Interactive menu visible */
++    BD_EVENT_MENU                   = 30,  /**< 0 - no, 1 - yes */
++
++    /** 3D */
++    BD_EVENT_STEREOSCOPIC_STATUS    = 31,  /**< 0 - 2D, 1 - 3D */
++
++    /** BD-J key interest table changed */
++    BD_EVENT_KEY_INTEREST_TABLE     = 32,  /**< bitmask, BLURAY_KIT_* */
++
++    /** UO mask changed */
++    BD_EVENT_UO_MASK_CHANGED        = 33,  /**< bitmask, BLURAY_UO_* */
++
++    /*BD_EVENT_LAST = 33, */
++
++} bd_event_e;
++
++/** Event */
++typedef struct {
++    uint32_t   event;  /**< Event type (\ref bd_event_e) */
++    uint32_t   param;  /**< Event data */
++} BD_EVENT;
++
++/* BD_EVENT_ERROR param values */
++#define BD_ERROR_HDMV    1                /**< HDMV VM failed to play the title  */
++#define BD_ERROR_BDJ     2                /**< BD-J failed to play the title     */
++
++/* BD_EVENT_ENCRYPTED param vlues */
++#define BD_ERROR_AACS    3                /**< AACS failed or not supported      */
++#define BD_ERROR_BDPLUS  4                /**< BD+ failed or not supported       */
++
++/* BD_EVENT_TITLE special titles */
++#define BLURAY_TITLE_FIRST_PLAY  0xffff   /**< "First Play" title started        */
++#define BLURAY_TITLE_TOP_MENU    0        /**< "Top Menu" title started          */
++
++/* BD_EVENT_KEY_INTEREST flags */
++#define BLURAY_KIT_PLAY          0x1      /**< BD-J requests to handle "Play" UO          */
++#define BLURAY_KIT_STOP          0x2      /**< BD-J requests to handle "Stop" UO          */
++#define BLURAY_KIT_FFW           0x4      /**< BD-J requests to handle "Fast Forward" UO  */
++#define BLURAY_KIT_REW           0x8      /**< BD-J requests to handle "Reverse" UO       */
++#define BLURAY_KIT_TRACK_NEXT    0x10     /**< BD-J requests to handle "Next Track" UO    */
++#define BLURAY_KIT_TRACK_PREV    0x20     /**< BD-J requests to handle "Prev Track" UO    */
++#define BLURAY_KIT_PAUSE         0x40     /**< BD-J requests to handle "Pause" UO         */
++#define BLURAY_KIT_STILL_OFF     0x80     /**< BD-J requests to handle "Still Off" UO     */
++#define BLURAY_KIT_SEC_AUDIO     0x100    /**< BD-J requests to handle "Sec. Audio" UO    */
++#define BLURAY_KIT_SEC_VIDEO     0x200    /**< BD-J requests to handle "Sec. Video" UO    */
++#define BLURAY_KIT_PG_TEXTST     0x400    /**< BD-J requests to handle "Subtitle" UO      */
++
++/* BD_EVENT_UO_MASK_CHANGED flags */
++#define BLURAY_UO_MENU_CALL                           0x1        /**< "Menu Call" masked (not allowed)                            */
++#define BLURAY_UO_TITLE_SEARCH                        0x2        /**< "Title Search" masked (not allowed)                         */
++#define BLURAY_UO_CHAPTER_SEARCH                      0x4        /**< "Chapter Search" masked (not allowed)                       */
++#define BLURAY_UO_TIME_SEARCH_MASK                    0x8        /**< "Time Search" masked (not allowed)                          */
++#define BLURAY_UO_SKIP_TO_NEXT_POINT_MASK             0x10       /**< "Skip to Next Point" masked (not allowed)                   */
++#define BLURAY_UO_SKIP_BACK_TO_PREVIOUS_POINT_MASK    0x20       /**< "Skip Back to Previous Point" masked (not allowed)          */
++#define BLURAY_UO_STOP_MASK                           0x40       /**< "Stop" masked (not allowed)                                 */
++#define BLURAY_UO_PAUSE_ON_MASK                       0x80       /**< "Pause On" masked (not allowed)                             */
++#define BLURAY_UO_STILL_OFF_MASK                      0x100      /**< "Still Off" masked (not allowed)                            */
++#define BLURAY_UO_FORWARD_PLAY_MASK                   0x200      /**< "Forward Play" masked (not allowed)                         */
++#define BLURAY_UO_BACKWARD_PLAY_MASK                  0x400      /**< "Backward Play" masked (not allowed)                        */
++#define BLURAY_UO_RESUME_MASK                         0x800      /**< "Resume" masked (not allowed)                               */
++#define BLURAY_UO_MOVE_UP_SELECTED_BUTTON_MASK        0x1000     /**< "Move Up Selected Button" masked (not allowed)              */
++#define BLURAY_UO_MOVE_DOWN_SELECTED_BUTTON_MASK      0x2000     /**< "Move Down Selected Button" masked (not allowed)            */
++#define BLURAY_UO_MOVE_LEFT_SELECTED_BUTTON_MASK      0x4000     /**< "Move Left Selected Button" masked (not allowed)            */
++#define BLURAY_UO_MOVE_RIGHT_SELECTED_BUTTON_MASK     0x8000     /**< "Move Right Selected Button" masked (not allowed)           */
++#define BLURAY_UO_SELECT_BUTTON_MASK                  0x10000    /**< "Select Button" masked (not allowed)                        */
++#define BLURAY_UO_ACTIVATE_BUTTON_MASK                0x20000    /**< "Activate Button" masked (not allowed)                      */
++#define BLURAY_UO_SELECT_AND_ACTIVATE_MASK            0x40000    /**< "Select Button and Activate" masked (not allowed)           */
++#define BLURAY_UO_PRIMARY_AUDIO_CHANGE_MASK           0x80000    /**< "Primary Audio Stream Number Change" masked (not allowed)   */
++#define BLURAY_UO_ANGLE_CHANGE_MASK                   0x100000   /**< "Angle Number Change" masked (not allowed)                  */
++#define BLURAY_UO_POPUP_ON_MASK                       0x200000   /**< "PopUp On" masked (not allowed)                             */
++#define BLURAY_UO_POPUP_OFF_MASK                      0x400000   /**< "PopUp Off" masked (not allowed)                            */
++#define BLURAY_UO_PG_TEXTST_ENABLE_DISABLE_MASK       0x800000   /**< "PG textST Enable Disable" masked (not allowed)             */
++#define BLURAY_UO_PG_TEXTST_CHANGE_MASK               0x1000000  /**< "PG textST Stream Number Change" masked (not allowed)       */
++#define BLURAY_UO_SECONDARY_VIDEO_ENABLE_DISABLE_MASK 0x2000000  /**< "Secondary Video Enable Disable" masked (not allowed)       */
++#define BLURAY_UO_SECONDARY_VIDEO_CHANGE_MASK         0x4000000  /**< "Secondary Video Stream Number Change" masked (not allowed) */
++#define BLURAY_UO_SECONDARY_AUDIO_ENABLE_DISABLE_MASK 0x8000000  /**< "Secondary Audio Enable Disable" masked (not allowed)       */
++#define BLURAY_UO_SECONDARY_AUDIO_CHANGE_MASK         0x10000000 /**< "Secondary Audio Stream Number Change" masked (not allowed) */
++#define BLURAY_UO_PIP_PG_TEXTST_CHANGE_MASK           0x20000000 /**< "PiP PG textST Stream Number Change" masked (not allowed)   */
++
++/**
++ *
++ *  Get event from libbluray event queue.
++ *
++ * @param bd  BLURAY object
++ * @param event next BD_EVENT from event queue, NULL to initialize event queue
++ * @return 1 on success, 0 if no events
++ */
++BD_PUBLIC int  bd_get_event(BLURAY *bd, BD_EVENT *event);
++
++/**
++ *
++ *  Get name of event
++ *
++ * @param event event type (\ref bd_event_e)
++ * @return 1 on success, 0 if no events
++ */
++BD_PUBLIC const char *bd_event_name(uint32_t /* bd_event_e */ event);
++
++/*
++ * On-screen display
++ */
++
++struct bd_overlay_s;      /* defined in overlay.h */
++struct bd_argb_overlay_s; /* defined in overlay.h */
++struct bd_argb_buffer_s;  /* defined in overlay.h */
++
++/**
++ * YUV overlay handler function type
++ *
++ * @param handle opaque handle that was given to bd_register_overlay_proc()
++ * @param event  \ref BD_OVERLAY event
++ */
++typedef void (*bd_overlay_proc_f)(void *handle, const struct bd_overlay_s * const event);
++
++/**
++ * ARGB overlay handler function type
++ *
++ * @param handle opaque handle that was given to bd_register_argb_overlay_proc()
++ * @param event  \ref BD_ARGB_OVERLAY event
++ */
++typedef void (*bd_argb_overlay_proc_f)(void *handle, const struct bd_argb_overlay_s * const event);
++
++/**
++ *
++ *  Register handler for compressed YUV overlays
++ *
++ *  Compressed YUV overlays are used with presentation graphics (subtitles)
++ *  and HDMV mode menus.
++ *  This function can be used when player does not support full-screen ARGB overlays
++ *  or player can optimize drawing of compressed overlays, color space conversion etc.
++ *
++ *  Callback function is called from application thread context while bd_*() functions
++ *  are called.
++ *
++ *  Note that BD-J mode outputs only ARGB graphics.
++ *
++ * @param bd  BLURAY object
++ * @param handle application-specific handle that will be passed to handler function
++ * @param func handler function pointer
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC void bd_register_overlay_proc(BLURAY *bd, void *handle, bd_overlay_proc_f func);
++
++/**
++ *
++ *  Register handler for ARGB overlays
++ *
++ *  ARGB overlays are used with BD-J (Java) menus.
++ *
++ *  Callback function can be called at any time by a thread created by Java VM.
++ *  No more than single call for each overlay plane are executed in paraller.
++ *
++ * @param bd  BLURAY object
++ * @param handle  application-specific handle that will be passed to handler function
++ * @param func  handler function pointer
++ * @param buf  optional application-allocated frame buffer
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC void bd_register_argb_overlay_proc(BLURAY *bd, void *handle, bd_argb_overlay_proc_f func, struct bd_argb_buffer_s *buf);
++
++
++/*
++ * Playback with on-disc menus
++ */
++
++/**
++ *
++ *  Start playing disc with on-disc menus
++ *
++ *  Playback is started from "First Play" title.
++ *
++ * @param bd  BLURAY object
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int  bd_play(BLURAY *bd);
++
++/**
++ *
++ *  Play a title (from disc index).
++ *
++ *  Title 0      = Top Menu
++ *  Title 0xffff = First Play title
++ *  Number of titles can be found from BLURAY_DISC_INFO.
++ *
++ * @param bd  BLURAY object
++ * @param title title number from disc index
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int  bd_play_title(BLURAY *bd, unsigned title);
++
++/**
++ *
++ *  Open BluRay disc Top Menu.
++ *
++ *  Current pts is needed for resuming playback when menu is closed.
++ *  May fail if UO mask bit BLURAY_UO_MENU_CALL is set.
++ *
++ * @param bd  BLURAY object
++ * @param pts current playback position (1/90000s) or -1
++ * @return 1 on success, 0 if error
++ */
++BD_PUBLIC int  bd_menu_call(BLURAY *bd, int64_t pts);
++
++/**
++ *
++ *  Read from currently playing title.
++ *
++ *  When playing disc in navigation mode this function must be used instead of bd_read().
++ *
++ * @param bd  BLURAY object
++ * @param buf buffer to read data into
++ * @param len size of data to be read
++ * @param event next BD_EVENT from event queue (BD_EVENT_NONE if no events)
++ * @return size of data read, -1 if error, 0 if event needs to be handled first, 0 if end of title was reached
++ */
++BD_PUBLIC int  bd_read_ext(BLURAY *bd, unsigned char *buf, int len, BD_EVENT *event);
++
++/**
++ *
++ *  Continue reading after still mode clip
++ *
++ * @param bd  BLURAY object
++ * @return 0 on error
++ */
++BD_PUBLIC int bd_read_skip_still(BLURAY *bd);
++
++/**
++ *
++ *  Get information about a playlist
++ *
++ * @param bd  BLURAY object
++ * @param playlist playlist number
++ * @param angle angle number (chapter offsets and clip size depend on selected angle)
++ * @return allocated BLURAY_TITLE_INFO object, NULL on error
++ */
++BD_PUBLIC BLURAY_TITLE_INFO* bd_get_playlist_info(BLURAY *bd, uint32_t playlist, unsigned angle);
++
++/**
++ *
++ *  Get sound effect
++ *
++ * @param bd  BLURAY object
++ * @param sound_id  sound effect id (0...N)
++ * @param effect     sound effect data
++ * @return <0 when no effects, 0 when id out of range, 1 on success
++ */
++BD_PUBLIC int bd_get_sound_effect(BLURAY *bd, unsigned sound_id, struct bd_sound_effect *effect);
++
++
++/*
++ * User interaction
++ */
++
++/**
++ *
++ *  Update current pts.
++ *
++ * @param bd  BLURAY object
++ * @param pts current playback position (1/90000s) or -1
++ */
++BD_PUBLIC void bd_set_scr(BLURAY *bd, int64_t pts);
++
++/**
++ *
++ *  Set current playback rate.
++ *
++ *  Notify BD-J media player when user changes playback rate
++ *  (ex. pauses playback).
++ *  Changing rate may fail if corresponding UO is masked or
++ *  playlist is not playing.
++ *
++ * @param bd  BLURAY object
++ * @param rate current playback rate * 90000 (0 = paused, 90000 = normal)
++ * @return <0 on error, 0 on success
++ */
++BD_PUBLIC int bd_set_rate(BLURAY *bd, uint32_t rate);
++
++#define BLURAY_RATE_PAUSED  0      /**< Set playback rate to PAUSED  */
++#define BLURAY_RATE_NORMAL  90000  /**< Set playback rate to NORMAL  */
++
++/**
++ *
++ *  Pass user input to graphics controller or BD-J.
++ *  Keys are defined in libbluray/keys.h.
++ *
++ *  Two user input models are supported:
++ *    - Single event when a key is typed once.
++ *    - Separate events when key is pressed and released.
++ *      VD_VK_KEY_PRESSED, BD_VK_TYPED and BD_VK_KEY_RELEASED are or'd with the key.
++ *
++ *  Depending on the action, may fail if one of the following UO mask bit is set:
++ *    - UO_MASK_MENU_CALL_INDEX (BD_VK_ROOT_MENU);
++ *    - UO_MASK_MOVE_UP_SELECTED_BUTTON_MASK_INDEX (BD_VK_UP);
++ *    - UO_MASK_MOVE_DOWN_SELECTED_BUTTON_MASK_INDEX (BD_VK_DOWN);
++ *    - UO_MASK_MOVE_LEFT_SELECTED_BUTTON_MASK_INDEX (BD_VK_LEFT);
++ *    - UO_MASK_MOVE_RIGHT_SELECTED_BUTTON_MASK_INDEX (BD_VK_RIGHT);
++ *    - UO_MASK_ACTIVATE_BUTTON_MASK_INDEX (BD_VK_ENTER);
++ *    - UO_MASK_POPUP_ON_MASK_INDEX (BD_VK_POPUP);
++ *    - UO_MASK_POPUP_OFF_MASK_INDEX (BD_VK_POPUP);
++ *
++ * @param bd  BLURAY object
++ * @param pts current playback position (1/90000s) or -1
++ * @param key input key (@see keys.h)
++ * @return <0 on error, 0 on success, >0 if selection/activation changed
++ */
++BD_PUBLIC int bd_user_input(BLURAY *bd, int64_t pts, uint32_t key);
++
++/**
++ *
++ *  Select menu button at location (x,y).
++ *
++ *  This function has no effect with BD-J menus.
++ *
++ * @param bd  BLURAY object
++ * @param pts current playback position (1/90000s) or -1
++ * @param x mouse pointer x-position
++ * @param y mouse pointer y-position
++ * @return <0 on error, 0 when mouse is outside of buttons, 1 when mouse is inside button
++ */
++BD_PUBLIC int bd_mouse_select(BLURAY *bd, int64_t pts, uint16_t x, uint16_t y);
++
++
++/*
++ * Testing and debugging
++ *
++ * Note: parsing functions can't be used with UDF images.
++ */
++
++/* access to internal information */
++
++struct clpi_cl;
++struct mpls_pl;
++struct bdjo_data;
++struct mobj_objects;
++
++/**
++ *
++ *  Get copy of clip information for requested playitem.
++ *
++ * @param bd  BLURAY objects
++ * @param clip_ref  requested playitem number
++ * @return pointer to allocated CLPI_CL object on success, NULL on error
++ */
++BD_PUBLIC struct clpi_cl *bd_get_clpi(BLURAY *bd, unsigned clip_ref);
++
++/** Testing/debugging: Parse clip information (CLPI) file */
++BD_PUBLIC struct clpi_cl *bd_read_clpi(const char *clpi_file);
++
++/**
++ *
++ *  Free CLPI_CL object
++ *
++ * @param cl  CLPI_CL objects
++ */
++BD_PUBLIC void bd_free_clpi(struct clpi_cl *cl);
++
++
++/** Testing/debugging: Parse playlist (MPLS) file */
++BD_PUBLIC struct mpls_pl *bd_read_mpls(const char *mpls_file);
++/** Testing/debugging: Free parsed playlist */
++BD_PUBLIC void bd_free_mpls(struct mpls_pl *);
++
++/** Testing/debugging: Parse movie objects (MOBJ) file */
++BD_PUBLIC struct mobj_objects *bd_read_mobj(const char *mobj_file);
++/** Testing/debugging: Free parsed movie objects */
++BD_PUBLIC void bd_free_mobj(struct mobj_objects *);
++
++/** Testing/debugging: Parse BD-J object file (BDJO) */
++BD_PUBLIC struct bdjo_data *bd_read_bdjo(const char *bdjo_file);
++/** Testing/debugging: Free parsed BDJO object */
++BD_PUBLIC void bd_free_bdjo(struct bdjo_data *);
++
++/* BD-J testing */
++
++/** Testing/debugging: start BD-J from the specified BD-J object (should be a 5 character string) */
++BD_PUBLIC int  bd_start_bdj(BLURAY *bd, const char* start_object);
++/** Testing/debugging: shutdown BD-J and clean up resources */
++BD_PUBLIC void bd_stop_bdj(BLURAY *bd);
++
++/**
++ *
++ *  Read a file from BluRay Virtual File System.
++ *
++ *  Allocate large enough memory block and read file contents.
++ *  Caller must free the memory block with free().
++ *
++ * @param bd  BLURAY object
++ * @param path  path to the file (relative to disc root)
++ * @param data  where to store pointer to allocated data
++ * @param size  where to store file size
++ * @return 1 on success, 0 on error
++ */
++BD_PUBLIC int bd_read_file(BLURAY *bd, const char *path, void **data, int64_t *size);
++
++/**
++ *
++ *  Open a directory from BluRay Virtual File System.
++ *
++ *  Caller must close with dir->close().
++ *
++ * @param bd  BLURAY object
++ * @param dir  target directory (relative to disc root)
++ * @return BD_DIR_H *, NULL if failed
++ */
++BD_PUBLIC struct bd_dir_s *bd_open_dir(BLURAY *bd, const char *dir);
++
++/**
++ *
++ *  Open a file from BluRay Virtual File System.
++ *
++ *  encrypted streams are decrypted, and because of how
++ *  decryption works, it can only seek to (N*6144) bytes,
++ *  and read 6144 bytes at a time.
++ *  DO NOT mix any play functionalities with these functions.
++ *  It might cause broken stream. In general, accessing
++ *  mutiple file on disk at the same time is a bad idea.
++ *
++ *  Caller must close with file->close().
++ *
++ * @param bd  BLURAY object
++ * @param path  path to the file (relative to disc root)
++ * @return BD_FILE_H *, NULL if failed
++ */
++BD_PUBLIC struct bd_file_s *bd_open_file_dec(BLURAY *bd, const char *path);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* BLURAY_H_ */
+diff --git a/src/third_party/udfread.h b/src/third_party/udfread.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..94b6cbb7145b5ce7468937a86a248d589a1e8181
+--- /dev/null
++++ b/src/third_party/udfread.h
+@@ -0,0 +1,320 @@
++/*
++ * This file is part of libudfread
++ * Copyright (C) 2014-2015 VLC authors and VideoLAN
++ *
++ * Authors: Petri Hintukainen <phintuka@users.sourceforge.net>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef UDFREAD_H_
++#define UDFREAD_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stdint.h>    /* *int_t */
++#include <sys/types.h> /* *size_t */
++
++#ifdef UDFREAD_API_EXPORT
++#include "attributes.h"
++#elif !defined(UDF_PUBLIC)
++#define UDF_PUBLIC
++#endif
++
++#if defined(_WIN32) && !defined(ssize_t)
++#include <windows.h>
++#define ssize_t SSIZE_T
++#endif
++
++/**
++ * @file udfread/udfread.h
++ * external API header
++ */
++
++/*
++ * NOTE:
++ *
++ * UDF filesystem file identifiers may contain nul bytes (0x00).
++ *
++ * In libudfread API file and directory names are encoded as Modified UTF-8 (MUTF-8).
++ * The null character (U+0000) uses two-byte overlong encoding 11000000 10000000
++ * (hexadecimal C0 80) instead of 00000000 (hexadecimal 00).
++ */
++
++/*
++ * UDF volume access
++ */
++
++/* opaque handle for UDF volume */
++typedef struct udfread udfread;
++
++struct udfread_block_input;
++
++/**
++ *  Initialize UDF reader
++ *
++ * @return allocated udfread object, NULL if error
++ */
++UDF_PUBLIC udfread *udfread_init (void);
++
++/**
++ *  Open UDF image
++ *
++ * @param p  udfread object
++ * @param input  UDF image access functions
++ * @return 0 on success, < 0 on error
++ */
++UDF_PUBLIC int udfread_open_input (udfread *, struct udfread_block_input *input);
++
++/**
++ *  Open UDF image
++ *
++ * @param p  udfread object
++ * @param path  path to device or image file
++ * @return 0 on success, < 0 on error
++ */
++UDF_PUBLIC int udfread_open (udfread *, const char *path);
++
++/**
++ *  Close UDF image
++ *
++ * @param p  udfread object
++ */
++UDF_PUBLIC void udfread_close (udfread *);
++
++/**
++ *  Get UDF Volume Identifier
++ *
++ * @param p  udfread object
++ * @return Volume ID as null-terminated MUTF-8 string, NULL if error. Returned pointer is valid until udfread_close().
++ */
++UDF_PUBLIC const char *udfread_get_volume_id (udfread *);
++
++/**
++ *  Get UDF Volume Set Identifier
++ *
++ * @param p  udfread object
++ * @param buffer buffer to receive volume set id
++ * @param size buffer size
++ * @return Volume set id size, 0 if error
++ */
++UDF_PUBLIC size_t udfread_get_volume_set_id (udfread *, void *buffer, size_t size);
++
++
++/*
++ * Directory access
++ */
++
++/* File types for d_type */
++enum {
++    UDF_DT_UNKNOWN = 0,
++    UDF_DT_DIR,
++    UDF_DT_REG,
++};
++
++/* Directory stream entry */
++struct udfread_dirent {
++    unsigned int  d_type;    /* UDF_DT_* */
++    const char   *d_name;    /* MUTF-8 */
++};
++
++/* opaque handle for directory stream */
++typedef struct udfread_dir UDFDIR;
++
++/**
++ *  Open directory stream
++ *
++ * @param p  udfread object
++ * @param path  path to the directory (MUTF-8)
++ * @return directory stream handle on the directory, or NULL if it could not be opened.
++ */
++UDF_PUBLIC UDFDIR *udfread_opendir (udfread *, const char *path);
++
++/**
++ *  Open directory stream
++ *
++ *  Directory name may contain special chars (/, \, ...).
++ *
++ * @param dir  parent directory stream handle
++ * @param name  name of the directory to open from dir (MUTF-8)
++ * @return directory stream handle on the directory, or NULL if it could not be opened.
++ */
++UDF_PUBLIC UDFDIR *udfread_opendir_at(UDFDIR *dir, const char *name);
++
++/**
++ *  Read directory stream
++ *
++ *  Read a directory entry from directory stream. Return a pointer to
++ *  udfread_dirent struct describing the entry, or NULL for EOF or error.
++ *
++ * @param p  directory stream
++ * @param entry  storege space for directory entry
++ * @return next directory stream entry, or NULL if EOF or error.
++ */
++UDF_PUBLIC struct udfread_dirent *udfread_readdir (UDFDIR *, struct udfread_dirent *entry);
++
++/**
++ *  Rewind directory stream
++ *
++ *  Rewind directory stream to the beginning of the directory.
++ *
++ * @param p  directory stream
++ */
++UDF_PUBLIC void udfread_rewinddir (UDFDIR *);
++
++/**
++ *  Close directory stream
++ *
++ * @param p  directory stream
++ */
++UDF_PUBLIC void udfread_closedir (UDFDIR *);
++
++
++/*
++ * File access
++ */
++
++/**
++ * The length of one Logical Block
++ */
++
++#ifndef UDF_BLOCK_SIZE
++#  define UDF_BLOCK_SIZE  2048
++#endif
++
++/* opaque handle for open file */
++typedef struct udfread_file UDFFILE;
++
++/**
++ *  Open a file
++ *
++ *  Allowed separator chars are \ and /.
++ *  Path to the file is always absolute (relative to disc image root).
++ *  Path may begin with single separator char.
++ *  Path may not contain "." or ".." directory components.
++ *
++ * @param p  udfread object
++ * @param path  path to the file (MUTF-8)
++ * @return file object, or NULL if it could not be opened.
++ */
++UDF_PUBLIC UDFFILE *udfread_file_open (udfread *, const char *path);
++
++/**
++ *  Open a file from directory
++ *
++ *  File name may contain special chars (/, \, ...).
++ *
++ * @param dir  parent directory stream handle
++ * @param name  name of the file (MUTF-8)
++ * @return file object, or NULL if it could not be opened.
++ */
++UDF_PUBLIC UDFFILE *udfread_file_openat (UDFDIR *dir, const char *name);
++
++/**
++ *  Close file object
++ *
++ * @param p  file object
++ */
++UDF_PUBLIC void udfread_file_close (UDFFILE *);
++
++/**
++ *  Get file size
++ *
++ * @param p  file object
++ * @return file size, -1 on error
++ */
++UDF_PUBLIC int64_t udfread_file_size (UDFFILE *);
++
++/*
++ * Block access
++ */
++
++/**
++ *  Get file block address
++ *
++ *  Convert file block number to absolute block address.
++ *
++ * @param p  file object
++ * @param file_block  file block number
++ * @return absolute block address, 0 on error
++ */
++UDF_PUBLIC uint32_t udfread_file_lba (UDFFILE *, uint32_t file_block);
++
++/**
++ *  Read blocks from a file
++ *
++ * @param p  file object
++ * @param buf  buffer for data
++ * @param file_block  file block number
++ * @param num_blocks  number of blocks to read
++ * @return number of blocks read, 0 on error
++ */
++UDF_PUBLIC uint32_t udfread_read_blocks (UDFFILE *, void *buf, uint32_t file_block, uint32_t num_blocks, int flags);
++
++
++/*
++ * Byte streams
++ */
++
++enum {
++    UDF_SEEK_SET = 0,
++    UDF_SEEK_CUR = 1,
++    UDF_SEEK_END = 2,
++};
++
++/**
++ *  Read bytes from a file
++ *
++ *  Reads the given number of bytes from the file and increment the
++ *  current read position by number of bytes read.
++ *
++ * @param p  file object
++ * @param buf  buffer for data
++ * @param bytes  number of bytes to read
++ * @return number of bytes read, 0 on EOF, -1 on error
++ */
++UDF_PUBLIC ssize_t udfread_file_read (UDFFILE *, void *buf, size_t bytes);
++
++/**
++ *  Get current read position of a file
++ *
++ * @param p  file object
++ * @return current read position of the file, -1 on error
++ */
++UDF_PUBLIC int64_t udfread_file_tell (UDFFILE *);
++
++/**
++ *  Set read position of a file
++ *
++ *  New read position is calculated from offset according to the directive whence as follows:
++ *    UDF_SEEK_SET  The offset is set to offset bytes.
++ *    UDF_SEEK_CUR  The offset is set to its current location plus offset bytes.
++ *    UDF_SEEK_END  The offset is set to the size of the file plus offset bytes.
++ *
++ * @param p  file object
++ * @param pos  byte offset
++ * @param whence  directive
++ * @return current read position of the file, -1 on error
++ */
++UDF_PUBLIC int64_t udfread_file_seek (UDFFILE *, int64_t pos, int whence);
++
++
++#ifdef __cplusplus
++} /* extern "C" */
++#endif
++
++#endif /* UDFREAD_H_ */

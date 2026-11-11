@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python -B tools/public_git.py --history

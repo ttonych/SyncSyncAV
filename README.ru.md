@@ -6,7 +6,7 @@ SyncSyncAV показывает, на сколько кадров или мил�
 
 ## Первый запуск
 
-Для Windows x64 с .NET Framework 4.8 скачайте **SyncSyncAV_0.1.1.zip**, распакуйте архив целиком и запустите `SyncSyncAV.exe`. Оставьте папку `Engine` рядом с программой. При первом запуске интерфейс будет русским в русскоязычной Windows и английским в остальных случаях. Язык можно сменить через **Настройки → Язык**, даже если оба видео уже открыты. [Скачать приложение](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.1/SyncSyncAV_0.1.1.zip) · [Исходники v0.1.1](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.1/SyncSyncAV_0.1.1_source.zip)
+Для Windows x64 с .NET Framework 4.8 скачайте **SyncSyncAV_0.1.2.zip**, распакуйте архив целиком и запустите `SyncSyncAV.exe`. Оставьте папку `Engine` рядом с программой. При первом запуске интерфейс будет русским в русскоязычной Windows и английским в остальных случаях. Язык можно сменить через **Настройки → Язык**, даже если оба видео уже открыты. [Скачать приложение](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.2/SyncSyncAV_0.1.2.zip) · [Исходники v0.1.2](https://github.com/ttonych/SyncSyncAV/releases/download/v0.1.2/SyncSyncAV_0.1.2_source.zip)
 
 ## Как определить смещение
 

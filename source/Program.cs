@@ -7,8 +7,8 @@ using System.Windows;
 using System.Windows.Markup;
 [assembly:AssemblyProduct("SyncSyncAV")]
 [assembly:AssemblyTitle("SyncSyncAV")]
-[assembly:AssemblyVersion("0.1.1.0")]
-[assembly:AssemblyFileVersion("0.1.1.0")]
+[assembly:AssemblyVersion("0.1.2.0")]
+[assembly:AssemblyFileVersion("0.1.2.0")]
 namespace SyncSyncAV {
  public static class Program {
   [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();

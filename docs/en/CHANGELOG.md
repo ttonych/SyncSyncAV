@@ -2,6 +2,10 @@
 
 [Русский](../ru/CHANGELOG.md) · [User guide](../../README.md)
 
+## v0.1.2 — 12 November 2026
+
+The English and Russian guides now explain how SyncSyncAV measures the offset in frames and milliseconds. Select the first frame after the same cut in both editions, then copy the offset into your editor to adjust the audio or subtitles. [Download v0.1.2](https://github.com/ttonych/SyncSyncAV/releases/tag/v0.1.2)
+
 ## v0.1.1 — 11 November 2026
 
 - The application ZIP includes both the English and Russian READMEs. The source tree also includes contributor guidelines, a roadmap, a changelog and the Engine build guide in both languages.

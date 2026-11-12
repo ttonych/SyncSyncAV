@@ -2,7 +2,7 @@
 
 [Русский](README.ru.md)
 
-SyncSyncAV helps you align audio or subtitles from two editions of the same film. Open the editions side by side, find the same frame in each, and read the offset in frames and milliseconds. Copy that value into the tool you use to adjust the track.
+SyncSyncAV helps you align audio or subtitles from one edition of a film with the video from another. Open both editions side by side and find the same cut in both. In each pane, select the first frame after that cut. The app shows the offset in frames and milliseconds. You can copy that value into the editor you use to adjust the track.
 
 ## First run
 
